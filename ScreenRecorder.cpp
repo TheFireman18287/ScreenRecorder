@@ -518,7 +518,6 @@ void InspectTexture(ID3D11Texture2D* texture) {
 void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
     HRESULT hr;
 
-    // Define a solid color for clearing the render target
     const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
 
     // Render the left texture
@@ -528,6 +527,12 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
         ComPtr<ID3D11RenderTargetView> leftRTV;
         g_device->CreateRenderTargetView(leftBackBuffer.Get(), nullptr, &leftRTV);
         g_context->OMSetRenderTargets(1, leftRTV.GetAddressOf(), nullptr);
+
+        // Bind the vertex buffer
+        UINT stride = sizeof(Vertex);
+        UINT offset = 0;
+        g_context->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
+        g_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
         // Bind the left texture as a shader resource
         g_context->PSSetShaderResources(0, 1, g_leftTextureSRV.GetAddressOf());
@@ -554,6 +559,12 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
         g_device->CreateRenderTargetView(rightBackBuffer.Get(), nullptr, &rightRTV);
         g_context->OMSetRenderTargets(1, rightRTV.GetAddressOf(), nullptr);
 
+        // Bind the vertex buffer
+        UINT stride = sizeof(Vertex);
+        UINT offset = 0;
+        g_context->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
+        g_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
         // Bind the right texture as a shader resource
         g_context->PSSetShaderResources(0, 1, g_rightTextureSRV.GetAddressOf());
 
@@ -571,6 +582,7 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
         std::cerr << "Failed to get right back buffer. HRESULT: " << std::hex << hr << std::endl;
     }
 }
+
 
 
 
