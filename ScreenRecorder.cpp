@@ -33,7 +33,8 @@ ComPtr<ID3D11PixelShader> pixelShader;
 ComPtr<ID3D11InputLayout> inputLayout;
 ComPtr<ID3D11ShaderResourceView> g_leftTextureSRV;
 ComPtr<ID3D11ShaderResourceView> g_rightTextureSRV;
-
+ComPtr<ID3D11Texture2D> g_leftStagingTexture;
+ComPtr<ID3D11Texture2D> g_rightStagingTexture;
 
 
 void CreateSwapChainForMonitor(
@@ -61,8 +62,11 @@ bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* conte
         return false;
     }
 
+
     // Copy the data from the source texture to the staging texture
     context->CopyResource(stagingTexture.Get(), texture);
+
+
 
     // Map the staging texture to access its data
     D3D11_MAPPED_SUBRESOURCE mappedResource;
@@ -236,6 +240,8 @@ void InitializeShaders() {
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
     };
 
+
+
     hr = g_device->CreateInputLayout(layout, ARRAYSIZE(layout), vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &inputLayout);
     if (FAILED(hr)) {
         std::cerr << "Failed to create input layout. HRESULT: " << std::hex << hr << std::endl;
@@ -244,6 +250,9 @@ void InitializeShaders() {
 
     std::cout << "Shaders initialized successfully." << std::endl;
 }
+
+
+
 
 
 bool InitializeCaptureResources() {
@@ -338,8 +347,36 @@ struct Vertex {
     float u, v;
 };
 
-ComPtr<ID3D11Buffer> vertexBuffer;
 
+void InitializeStagingTextures() {
+    HRESULT hr;
+    D3D11_TEXTURE2D_DESC desc = {};
+    g_leftTexture->GetDesc(&desc);
+
+    // Create the staging texture for the left texture
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    hr = g_device->CreateTexture2D(&stagingDesc, nullptr, &g_leftStagingTexture);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create left staging texture. HRESULT: " << std::hex << hr << std::endl;
+    }
+
+    // Create the staging texture for the right texture
+    hr = g_device->CreateTexture2D(&stagingDesc, nullptr, &g_rightStagingTexture);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create right staging texture. HRESULT: " << std::hex << hr << std::endl;
+    }
+}
+
+
+
+
+
+
+ComPtr<ID3D11Buffer> vertexBuffer;
 void CreateFullScreenQuad() {
     Vertex quadVertices[] = {
         { -1.0f, -1.0f, 0.0f, 0.0f, 1.0f },
@@ -366,16 +403,22 @@ void CreateFullScreenQuad() {
 void CreateShaderResourceViews() {
     HRESULT hr;
 
-    // Create shader resource view for the left texture
+    // Left texture
     hr = g_device->CreateShaderResourceView(g_leftTexture.Get(), nullptr, &g_leftTextureSRV);
     if (FAILED(hr)) {
         std::cerr << "Failed to create SRV for left texture. HRESULT: " << std::hex << hr << std::endl;
     }
+    else {
+        std::cout << "Shader resource view created for left texture." << std::endl;
+    }
 
-    // Create shader resource view for the right texture
+    // Right texture
     hr = g_device->CreateShaderResourceView(g_rightTexture.Get(), nullptr, &g_rightTextureSRV);
     if (FAILED(hr)) {
         std::cerr << "Failed to create SRV for right texture. HRESULT: " << std::hex << hr << std::endl;
+    }
+    else {
+        std::cout << "Shader resource view created for right texture." << std::endl;
     }
 }
 
@@ -479,44 +522,35 @@ void InitializeMonitorsAndSwapChains(ComPtr<IDXGISwapChain>& leftSwapChain, ComP
     }
 }
 
-void InspectTexture(ID3D11Texture2D* texture) {
-    // Create a staging texture
-    D3D11_TEXTURE2D_DESC desc;
-    texture->GetDesc(&desc);
-
-    D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingDesc.BindFlags = 0;
-
-    ComPtr<ID3D11Texture2D> stagingTexture;
-    HRESULT hr = g_device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create staging texture. HRESULT: " << std::hex << hr << std::endl;
+void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> stagingTexture, const std::string& name) {
+    if (!stagingTexture || !texture) {
+        std::cerr << "One or both textures are null. Cannot inspect " << name << "." << std::endl;
         return;
     }
 
-    // Copy the data
-    g_context->CopyResource(stagingTexture.Get(), texture);
+    // No HRESULT assignment, as CopyResource returns void
+    g_context->CopyResource(stagingTexture.Get(), texture.Get());
 
-    // Map the texture
     D3D11_MAPPED_SUBRESOURCE mappedResource;
-    hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    HRESULT hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
     if (FAILED(hr)) {
-        std::cerr << "Failed to map staging texture. HRESULT: " << std::hex << hr << std::endl;
+        std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
         return;
     }
 
-    // Log the first pixel value
-    auto* data = static_cast<uint32_t*>(mappedResource.pData);
-    std::cout << "First pixel RGBA: " << std::hex << *data << std::endl;
+    uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
+    std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
 
     g_context->Unmap(stagingTexture.Get(), 0);
 }
 
 
+
 void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
     HRESULT hr;
+    InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
+    InspectTexture(g_rightTexture, g_rightStagingTexture, "Right Texture");
+
 
     const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
 
@@ -649,30 +683,33 @@ int main() {
         std::cerr << "Failed to initialize COM library. HRESULT: " << std::hex << hr << std::endl;
         return -1;
     }
+
     if (!InitializeCaptureResources()) {
         CoUninitialize();
         return -1;
     }
 
-    InitializeShaders(); //To Initilize shaders and compile them
+    
 
-    // Initialize monitors and swap chains
+    InitializeShaders();
     InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
 
-    //Initalize Vertex Texture
-    CreateFullScreenQuad();
-
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
+
+
 
     while (true) {
         if (!CaptureFrame()) {
             break;
         }
-
-        // Render the split textures to monitors
+        CreateShaderResourceViews(); // Call the function here
+        InitializeStagingTextures();
         RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
+
+
     }
 
     CoUninitialize();
     return 0;
 }
+
