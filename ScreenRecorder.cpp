@@ -11,7 +11,8 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
-
+#include <chrono>
+#include <thread>
 
 HWND CreateRenderWindow(const wchar_t* title);
 
@@ -46,6 +47,7 @@ void CreateSwapChainForMonitor(
 
 bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
     // Get the texture description
+
     D3D11_TEXTURE2D_DESC desc;
     texture->GetDesc(&desc);
 
@@ -57,6 +59,12 @@ bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* conte
 
     ComPtr<ID3D11Texture2D> stagingTexture;
     HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
+
+
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        std::cerr << "Device lost. Reason: "
+            << std::hex << g_device->GetDeviceRemovedReason() << std::endl;
+    }
     if (FAILED(hr)) {
         std::cerr << "Failed to create staging texture. HRESULT: " << std::hex << hr << std::endl;
         return false;
@@ -316,6 +324,7 @@ bool InitializeCaptureResources() {
     std::cout << "Desktop duplication created successfully." << std::endl;
 
     // Create left and right textures
+
     D3D11_TEXTURE2D_DESC halfDesc = {};
     halfDesc.Width = 2560;
     halfDesc.Height = 1440;
@@ -339,6 +348,7 @@ bool InitializeCaptureResources() {
     }
 
     std::cout << "Textures for splitting created successfully." << std::endl;
+    std::cout << "Finished Creating Device, Duplicate, Texture Spliting (1 func: InitializeCaptureResources) " << std::endl;
     return true;
 }
 
@@ -369,6 +379,8 @@ void InitializeStagingTextures() {
     if (FAILED(hr)) {
         std::cerr << "Failed to create right staging texture. HRESULT: " << std::hex << hr << std::endl;
     }
+
+    std::cout << "Created Staging Textures " << std::endl;
 }
 
 
@@ -396,7 +408,10 @@ void CreateFullScreenQuad() {
     HRESULT hr = g_device->CreateBuffer(&vertexBufferDesc, &vertexData, &vertexBuffer);
     if (FAILED(hr)) {
         std::cerr << "Failed to create vertex buffer. HRESULT: " << std::hex << hr << std::endl;
+
     }
+
+    std::cout << "Created vertex buffer " << std::endl;
 }
 
 
@@ -548,38 +563,51 @@ void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> sta
 
 void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
     HRESULT hr;
+    // Check if the device and context are valid
+    if (!g_device || !g_context) {
+        std::cerr << "Device or context is null!" << std::endl;
+        return;
+    }
+
+    // Make sure swap chains are valid
+    if (!leftSwapChain || !rightSwapChain) {
+        std::cerr << "One or both swap chains are null!" << std::endl;
+        return;
+    }
+
+    // Optionally, log swap chain details to ensure they are correct
+    std::cout << "Rendering to Left Swap Chain: " << leftSwapChain.Get() << std::endl;
+    std::cout << "Rendering to Right Swap Chain: " << rightSwapChain.Get() << std::endl;
+    std::cout << "\nCalling InspectTexture for left and right texture from RenderToMonotor!\n " << rightSwapChain.Get() << std::endl;
     InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
     InspectTexture(g_rightTexture, g_rightStagingTexture, "Right Texture");
 
 
-    const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
 
-    // Render the left texture
+     // Render the left texture
     ComPtr<ID3D11Texture2D> leftBackBuffer;
     hr = leftSwapChain->GetBuffer(0, IID_PPV_ARGS(&leftBackBuffer));
     if (SUCCEEDED(hr)) {
         ComPtr<ID3D11RenderTargetView> leftRTV;
-        g_device->CreateRenderTargetView(leftBackBuffer.Get(), nullptr, &leftRTV);
-        g_context->OMSetRenderTargets(1, leftRTV.GetAddressOf(), nullptr);
+        hr = g_device->CreateRenderTargetView(leftBackBuffer.Get(), nullptr, &leftRTV);
+        if (SUCCEEDED(hr)) {
+            // Set the render target view for the left swap chain
+            g_context->OMSetRenderTargets(1, leftRTV.GetAddressOf(), nullptr);
 
-        // Bind the vertex buffer
-        UINT stride = sizeof(Vertex);
-        UINT offset = 0;
-        g_context->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
-        g_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            // Optional: clear the render target before drawing
+            const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
+            g_context->ClearRenderTargetView(leftRTV.Get(), clearColor);
 
-        // Bind the left texture as a shader resource
-        g_context->PSSetShaderResources(0, 1, g_leftTextureSRV.GetAddressOf());
+            // Additional rendering steps (binding shaders, drawing, etc.)
+            // g_context->Draw(...);
 
-        // Clear the render target
-        g_context->ClearRenderTargetView(leftRTV.Get(), clearColor);
-
-        // Draw the full-screen quad
-        g_context->Draw(4, 0);
-
-        // Present the frame
-        leftSwapChain->Present(1, 0);
-        std::cout << "Left texture presented." << std::endl;
+            // Present the left swap chain
+            leftSwapChain->Present(1, 0);
+            std::cout << "Left texture presented." << std::endl;
+        }
+        else {
+            std::cerr << "Failed to create Render Target View for Left texture. HRESULT: " << std::hex << hr << std::endl;
+        }
     }
     else {
         std::cerr << "Failed to get left back buffer. HRESULT: " << std::hex << hr << std::endl;
@@ -590,27 +618,25 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
     hr = rightSwapChain->GetBuffer(0, IID_PPV_ARGS(&rightBackBuffer));
     if (SUCCEEDED(hr)) {
         ComPtr<ID3D11RenderTargetView> rightRTV;
-        g_device->CreateRenderTargetView(rightBackBuffer.Get(), nullptr, &rightRTV);
-        g_context->OMSetRenderTargets(1, rightRTV.GetAddressOf(), nullptr);
+        hr = g_device->CreateRenderTargetView(rightBackBuffer.Get(), nullptr, &rightRTV);
+        if (SUCCEEDED(hr)) {
+            // Set the render target view for the right swap chain
+            g_context->OMSetRenderTargets(1, rightRTV.GetAddressOf(), nullptr);
 
-        // Bind the vertex buffer
-        UINT stride = sizeof(Vertex);
-        UINT offset = 0;
-        g_context->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
-        g_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            // Optional: clear the render target before drawing
+            const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
+            g_context->ClearRenderTargetView(rightRTV.Get(), clearColor);
 
-        // Bind the right texture as a shader resource
-        g_context->PSSetShaderResources(0, 1, g_rightTextureSRV.GetAddressOf());
+            // Additional rendering steps (binding shaders, drawing, etc.)
+            // g_context->Draw(...);
 
-        // Clear the render target
-        g_context->ClearRenderTargetView(rightRTV.Get(), clearColor);
-
-        // Draw the full-screen quad
-        g_context->Draw(4, 0);
-
-        // Present the frame
-        rightSwapChain->Present(1, 0);
-        std::cout << "Right texture presented." << std::endl;
+            // Present the right swap chain
+            rightSwapChain->Present(1, 0);
+            std::cout << "Right texture presented." << std::endl;
+        }
+        else {
+            std::cerr << "Failed to create Render Target View for Right texture. HRESULT: " << std::hex << hr << std::endl;
+        }
     }
     else {
         std::cerr << "Failed to get right back buffer. HRESULT: " << std::hex << hr << std::endl;
@@ -658,7 +684,7 @@ bool CaptureFrame() {
     // Save left and right textures as PNG files
 
     // Commenting out image creation for now
-    /*
+    
     static int frameIndex = 0;
     wchar_t leftFilename[128];
     wchar_t rightFilename[128];
@@ -669,7 +695,7 @@ bool CaptureFrame() {
     SaveTextureAsPNGStandalone(g_device.Get(), g_context.Get(), g_rightTexture.Get(), rightFilename);
 
     frameIndex++;
-    */
+    
 
 
     
@@ -690,25 +716,41 @@ int main() {
     }
 
     
-
-    InitializeShaders();
+    //InitializeCaptureResources();
+    //InitializeShaders();
     InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
+    CreateShaderResourceViews(); // Call the function here
+    InitializeStagingTextures();
+    InitializeShaders();
+    CreateFullScreenQuad();
+    RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
 
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
 
 
 
-    while (true) {
+    /*while (true) {
         if (!CaptureFrame()) {
             break;
         }
         CreateShaderResourceViews(); // Call the function here
         InitializeStagingTextures();
         RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
+        InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
 
 
-    }
+    } */
 
+    //CaptureFrame();
+    //RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
+
+
+
+    //InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
+    std::cin.get(); // Wait for user input before exiting
+    // Add this after rendering the first frame
+    std::cout << "Pausing for 10 seconds to inspect the output..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(999));
     CoUninitialize();
     return 0;
 }
