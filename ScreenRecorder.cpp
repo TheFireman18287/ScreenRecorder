@@ -381,23 +381,74 @@ void InitializeMonitorsAndSwapChains(ComPtr<IDXGISwapChain>& leftSwapChain, ComP
     }
 }
 
-void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
-    // Render left texture
-    ComPtr<ID3D11Texture2D> leftBackBuffer;
-    HRESULT hr = leftSwapChain->GetBuffer(0, IID_PPV_ARGS(&leftBackBuffer));
-    if (SUCCEEDED(hr)) {
-        g_context->CopyResource(leftBackBuffer.Get(), g_leftTexture.Get());
-        leftSwapChain->Present(1, 0);
+void InspectTexture(ID3D11Texture2D* texture) {
+    // Create a staging texture
+    D3D11_TEXTURE2D_DESC desc;
+    texture->GetDesc(&desc);
+
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingDesc.BindFlags = 0;
+
+    ComPtr<ID3D11Texture2D> stagingTexture;
+    HRESULT hr = g_device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create staging texture. HRESULT: " << std::hex << hr << std::endl;
+        return;
     }
 
-    // Render right texture
+    // Copy the data
+    g_context->CopyResource(stagingTexture.Get(), texture);
+
+    // Map the texture
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to map staging texture. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Log the first pixel value
+    auto* data = static_cast<uint32_t*>(mappedResource.pData);
+    std::cout << "First pixel RGBA: " << std::hex << *data << std::endl;
+
+    g_context->Unmap(stagingTexture.Get(), 0);
+}
+
+
+void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
+    HRESULT hr;
+    InspectTexture(g_leftTexture.Get());
+    InspectTexture(g_rightTexture.Get());
+
+    // Render the left texture to the left monitor
+    ComPtr<ID3D11Texture2D> leftBackBuffer;
+    hr = leftSwapChain->GetBuffer(0, IID_PPV_ARGS(&leftBackBuffer));
+    if (SUCCEEDED(hr)) {
+        g_context->CopyResource(leftBackBuffer.Get(), g_leftTexture.Get());
+        leftSwapChain->Present(1, 0); // Present the frame to the screen
+    }
+    else {
+        std::cerr << "Failed to get left back buffer. HRESULT: " << std::hex << hr << std::endl;
+    }
+
+
+
+
+    // Render the right texture to the right monitor
     ComPtr<ID3D11Texture2D> rightBackBuffer;
     hr = rightSwapChain->GetBuffer(0, IID_PPV_ARGS(&rightBackBuffer));
     if (SUCCEEDED(hr)) {
         g_context->CopyResource(rightBackBuffer.Get(), g_rightTexture.Get());
-        rightSwapChain->Present(1, 0);
+        rightSwapChain->Present(1, 0); // Present the frame to the screen
     }
+    else {
+        std::cerr << "Failed to get right back buffer. HRESULT: " << std::hex << hr << std::endl;
+    }
+
 }
+
 
 
 
