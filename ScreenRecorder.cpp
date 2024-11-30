@@ -10,6 +10,8 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
+HWND CreateRenderWindow(const wchar_t* title);
+
 
 
 
@@ -23,6 +25,13 @@ ComPtr<ID3D11Texture2D> g_leftTexture;
 ComPtr<ID3D11Texture2D> g_rightTexture;
 ComPtr<IDXGISwapChain> g_leftSwapChain;
 ComPtr<IDXGISwapChain> g_rightSwapChain;
+
+
+void CreateSwapChainForMonitor(
+    ComPtr<IDXGIOutput> output,
+    ComPtr<IDXGISwapChain>& swapChain,
+    const wchar_t* windowTitle
+);
 
 
 bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
@@ -271,6 +280,76 @@ bool InitializeCaptureResources() {
     return true;
 }
 
+
+void CreateSwapChainForMonitor(
+    ComPtr<IDXGIOutput> output,
+    ComPtr<IDXGISwapChain>& swapChain,
+    const wchar_t* windowTitle
+) {
+    // Create a window for this monitor
+    HWND hwnd = CreateRenderWindow(windowTitle);
+
+    // Define the swap chain description
+    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+    swapChainDesc.BufferCount = 1;
+    swapChainDesc.BufferDesc.Width = 2560;  // Match half width
+    swapChainDesc.BufferDesc.Height = 1440; // Match height
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.OutputWindow = hwnd;
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.Windowed = TRUE; // Fullscreen can be configured if needed
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    // Create the swap chain
+    ComPtr<IDXGIFactory1> factory;
+    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create DXGI factory. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    hr = factory->CreateSwapChain(g_device.Get(), &swapChainDesc, &swapChain);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create swap chain for monitor. HRESULT: " << std::hex << hr << std::endl;
+    }
+    else {
+        std::wcout << L"Swap chain created for monitor: " << windowTitle << std::endl;
+    }
+}
+
+HWND CreateRenderWindow(const wchar_t* title) {
+    // Define a simple window class
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = DefWindowProc;
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.lpszClassName = L"DirectXWindow";
+
+    // Register the window class
+    RegisterClass(&wc);
+
+    // Create the window
+    HWND hwnd = CreateWindowEx(
+        0,
+        wc.lpszClassName,
+        title,
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        2560, 1440, // Default width and height for the window
+        nullptr,
+        nullptr,
+        wc.hInstance,
+        nullptr
+    );
+
+    // Show the window
+    ShowWindow(hwnd, SW_SHOW);
+
+    return hwnd;
+}
+
+
+
 void InitializeMonitorsAndSwapChains(ComPtr<IDXGISwapChain>& leftSwapChain, ComPtr<IDXGISwapChain>& rightSwapChain) {
     // Create a DXGI Factory
     ComPtr<IDXGIFactory1> factory;
@@ -386,12 +465,6 @@ int main() {
         return -1;
     }
 
-    void CreateSwapChainForMonitor(
-        ComPtr<IDXGIOutput> output,
-        ComPtr<IDXGISwapChain>&swapChain,
-        const wchar_t* windowTitle
-
-    );
 
     // Initialize monitors and swap chains
     InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
