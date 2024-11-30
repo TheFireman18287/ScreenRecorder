@@ -7,9 +7,12 @@
 #include <vector>
 #include <fstream> // For redirecting std::cout and std::cerr
 #include <wincodec.h> // For Windows Imaging Component
+#include <d3dcompiler.h>
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
+
+
 HWND CreateRenderWindow(const wchar_t* title);
 
 
@@ -25,6 +28,9 @@ ComPtr<ID3D11Texture2D> g_leftTexture;
 ComPtr<ID3D11Texture2D> g_rightTexture;
 ComPtr<IDXGISwapChain> g_leftSwapChain;
 ComPtr<IDXGISwapChain> g_rightSwapChain;
+ComPtr<ID3D11VertexShader> vertexShader;
+ComPtr<ID3D11PixelShader> pixelShader;
+ComPtr<ID3D11InputLayout> inputLayout;
 
 
 void CreateSwapChainForMonitor(
@@ -193,6 +199,50 @@ int CALLBACK WinMain(
 
 
 // Function to initialize DirectX and Desktop Duplication API
+
+void InitializeShaders() {
+    // Compile the vertex shader
+    ComPtr<ID3DBlob> vsBlob;
+    HRESULT hr = D3DCompileFromFile(L"VertexShader.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &vsBlob, nullptr);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to compile vertex shader. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+    hr = g_device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vertexShader);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create vertex shader. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Compile the pixel shader
+    ComPtr<ID3DBlob> psBlob;
+    hr = D3DCompileFromFile(L"PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &psBlob, nullptr);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to compile pixel shader. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+    hr = g_device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &pixelShader);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create pixel shader. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Define the input layout
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    hr = g_device->CreateInputLayout(layout, ARRAYSIZE(layout), vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &inputLayout);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create input layout. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    std::cout << "Shaders initialized successfully." << std::endl;
+}
+
+
 bool InitializeCaptureResources() {
     HRESULT hr;
 
@@ -516,6 +566,7 @@ int main() {
         return -1;
     }
 
+    InitializeShaders(); //To Initilize shaders and compile them
 
     // Initialize monitors and swap chains
     InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
