@@ -31,6 +31,9 @@ ComPtr<IDXGISwapChain> g_rightSwapChain;
 ComPtr<ID3D11VertexShader> vertexShader;
 ComPtr<ID3D11PixelShader> pixelShader;
 ComPtr<ID3D11InputLayout> inputLayout;
+ComPtr<ID3D11ShaderResourceView> g_leftTextureSRV;
+ComPtr<ID3D11ShaderResourceView> g_rightTextureSRV;
+
 
 
 void CreateSwapChainForMonitor(
@@ -330,6 +333,51 @@ bool InitializeCaptureResources() {
     return true;
 }
 
+struct Vertex {
+    float x, y, z;
+    float u, v;
+};
+
+ComPtr<ID3D11Buffer> vertexBuffer;
+
+void CreateFullScreenQuad() {
+    Vertex quadVertices[] = {
+        { -1.0f, -1.0f, 0.0f, 0.0f, 1.0f },
+        { -1.0f,  1.0f, 0.0f, 0.0f, 0.0f },
+        {  1.0f, -1.0f, 0.0f, 1.0f, 1.0f },
+        {  1.0f,  1.0f, 0.0f, 1.0f, 0.0f },
+    };
+
+    D3D11_BUFFER_DESC vertexBufferDesc = {};
+    vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    vertexBufferDesc.ByteWidth = sizeof(quadVertices);
+    vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+
+    D3D11_SUBRESOURCE_DATA vertexData = {};
+    vertexData.pSysMem = quadVertices;
+
+    HRESULT hr = g_device->CreateBuffer(&vertexBufferDesc, &vertexData, &vertexBuffer);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create vertex buffer. HRESULT: " << std::hex << hr << std::endl;
+    }
+}
+
+
+void CreateShaderResourceViews() {
+    HRESULT hr;
+
+    // Create shader resource view for the left texture
+    hr = g_device->CreateShaderResourceView(g_leftTexture.Get(), nullptr, &g_leftTextureSRV);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create SRV for left texture. HRESULT: " << std::hex << hr << std::endl;
+    }
+
+    // Create shader resource view for the right texture
+    hr = g_device->CreateShaderResourceView(g_rightTexture.Get(), nullptr, &g_rightTextureSRV);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create SRV for right texture. HRESULT: " << std::hex << hr << std::endl;
+    }
+}
 
 void CreateSwapChainForMonitor(
     ComPtr<IDXGIOutput> output,
@@ -378,14 +426,14 @@ HWND CreateRenderWindow(const wchar_t* title) {
     // Register the window class
     RegisterClass(&wc);
 
-    // Create the window
+    // Create the window with a movable style
     HWND hwnd = CreateWindowEx(
         0,
         wc.lpszClassName,
         title,
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW,  // Allow resizing and moving
         CW_USEDEFAULT, CW_USEDEFAULT,
-        2560, 1440, // Default width and height for the window
+        2560, 1440,           // Default size
         nullptr,
         nullptr,
         wc.hInstance,
@@ -469,17 +517,30 @@ void InspectTexture(ID3D11Texture2D* texture) {
 
 void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
     HRESULT hr;
-    // Get the RGB value of the first texture to make sure it's not nothing. 
-    InspectTexture(g_leftTexture.Get());
-    InspectTexture(g_rightTexture.Get());
+
+    // Define a solid color for clearing the render target
+    const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
 
     // Render the left texture
     ComPtr<ID3D11Texture2D> leftBackBuffer;
     hr = leftSwapChain->GetBuffer(0, IID_PPV_ARGS(&leftBackBuffer));
     if (SUCCEEDED(hr)) {
-        g_context->CopyResource(leftBackBuffer.Get(), g_leftTexture.Get());
-        std::cout << "Left texture copied to back buffer." << std::endl;
+        ComPtr<ID3D11RenderTargetView> leftRTV;
+        g_device->CreateRenderTargetView(leftBackBuffer.Get(), nullptr, &leftRTV);
+        g_context->OMSetRenderTargets(1, leftRTV.GetAddressOf(), nullptr);
+
+        // Bind the left texture as a shader resource
+        g_context->PSSetShaderResources(0, 1, g_leftTextureSRV.GetAddressOf());
+
+        // Clear the render target
+        g_context->ClearRenderTargetView(leftRTV.Get(), clearColor);
+
+        // Draw the full-screen quad
+        g_context->Draw(4, 0);
+
+        // Present the frame
         leftSwapChain->Present(1, 0);
+        std::cout << "Left texture presented." << std::endl;
     }
     else {
         std::cerr << "Failed to get left back buffer. HRESULT: " << std::hex << hr << std::endl;
@@ -489,15 +550,30 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
     ComPtr<ID3D11Texture2D> rightBackBuffer;
     hr = rightSwapChain->GetBuffer(0, IID_PPV_ARGS(&rightBackBuffer));
     if (SUCCEEDED(hr)) {
-        g_context->CopyResource(rightBackBuffer.Get(), g_rightTexture.Get());
-        std::cout << "Right texture copied to back buffer." << std::endl;
+        ComPtr<ID3D11RenderTargetView> rightRTV;
+        g_device->CreateRenderTargetView(rightBackBuffer.Get(), nullptr, &rightRTV);
+        g_context->OMSetRenderTargets(1, rightRTV.GetAddressOf(), nullptr);
+
+        // Bind the right texture as a shader resource
+        g_context->PSSetShaderResources(0, 1, g_rightTextureSRV.GetAddressOf());
+
+        // Clear the render target
+        g_context->ClearRenderTargetView(rightRTV.Get(), clearColor);
+
+        // Draw the full-screen quad
+        g_context->Draw(4, 0);
+
+        // Present the frame
         rightSwapChain->Present(1, 0);
+        std::cout << "Right texture presented." << std::endl;
     }
     else {
         std::cerr << "Failed to get right back buffer. HRESULT: " << std::hex << hr << std::endl;
     }
-
 }
+
+
+
 
 
 
@@ -570,6 +646,9 @@ int main() {
 
     // Initialize monitors and swap chains
     InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
+
+    //Initalize Vertex Texture
+    CreateFullScreenQuad();
 
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
 
