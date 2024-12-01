@@ -65,7 +65,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     }
 }
 
-
 void RenderTextures() {
     // Set the input layout and primitive topology
     g_context->IASetInputLayout(g_inputLayout.Get());  // Make sure to call Get() for ComPtr
@@ -125,6 +124,12 @@ void CreateSamplerState() {
 
 
 void CreateRenderTargetViews() {
+
+    // Check if the textures are created before creating RTVs
+    if (!g_leftTexture || !g_rightTexture) {
+        std::cerr << "Error: Textures are not created correctly!" << std::endl;
+        return;
+    }
     // Create the render target view for the left texture
     HRESULT hr = g_device->CreateRenderTargetView(g_leftTexture.Get(), nullptr, &g_leftRenderTargetView);
     if (FAILED(hr)) {
