@@ -361,10 +361,17 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         return -1;
     }
 
-    //Start the main program
+    //Initilize the devie and setup duplication
     if (!InitializeDeviceAndDuplication()) {
         return -1;
     }
+
+    //CreateVertexBuffer 
+    if (!CreateVertexBuffer()) {
+        return -1;
+    }
+
+
     //Loadshaders calls createinputlayout
     if (!LoadShaders()) {
         return -1;
