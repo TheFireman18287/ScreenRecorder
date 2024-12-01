@@ -65,6 +65,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     }
 }
 
+
+void RenderTextures() {
+    // Set the input layout and primitive topology
+    g_context->IASetInputLayout(g_inputLayout.Get());  // Make sure to call Get() for ComPtr
+    g_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+    // Set the vertex buffer (quad vertices)
+    UINT stride = sizeof(Vertex);
+    UINT offset = 0;
+    g_context->IASetVertexBuffers(0, 1, &g_vertexBuffer, &stride, &offset);
+
+    // Set the pixel shader
+    g_context->PSSetShader(g_pixelShader.Get(), nullptr, 0);  // Get() for ComPtr
+
+    // Bind the left texture SRV to the pixel shader (slot 0)
+    g_context->PSSetShaderResources(0, 1, g_leftSRV.GetAddressOf());  // g_leftSRV is a ComPtr<ID3D11ShaderResourceView>
+
+    // Bind the sampler state to the pixel shader
+    g_context->PSSetSamplers(0, 1, g_sampler.GetAddressOf());  // g_sampler is a ComPtr<ID3D11SamplerState>
+
+    // Draw the quad with the left texture
+    g_context->Draw(4, 0);  // Draw the left texture quad
+
+    // Bind the right texture SRV to the pixel shader (slot 1)
+    g_context->PSSetShaderResources(1, 1, g_rightSRV.GetAddressOf());  // g_rightSRV is a ComPtr<ID3D11ShaderResourceView>
+
+    // Draw the quad with the right texture
+    g_context->Draw(4, 0);  // Draw the right texture quad
+}
+
+
+
 void CreateSamplerState() {
     D3D11_SAMPLER_DESC samplerDesc = {};
     samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -89,6 +121,7 @@ void CreateSamplerState() {
 
     std::cout << "SamplerState created Sucessfully." << std::endl;
 }
+
 
 
 void CreateRenderTargetViews() {
@@ -492,6 +525,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             break;
         }
         CreateSRVs();
+        RenderTextures();
     }
 
     return 0;
