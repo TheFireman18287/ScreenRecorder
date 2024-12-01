@@ -41,15 +41,97 @@ ComPtr<ID3D11RenderTargetView> rightRTV;
 D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };
 D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 }; 
 
+
+void CopyTextureContent() {
+    // Define source region for g_leftTexture (left part)
+    D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };
+
+    // Define source region for g_rightTexture (right part)
+    D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 };
+
+    // Copy content from g_leftTexture to g_rightTexture
+    g_context->CopySubresourceRegion(
+        g_rightTexture.Get(),  // Destination texture (g_rightTexture)
+        0,                     // Destination mip level
+        0, 0, 0,               // Destination coordinates (top-left corner)
+        g_leftTexture.Get(),   // Source texture (g_leftTexture)
+        0,                     // Source mip level
+        &leftBox               // Source region (leftBox)
+    );
+
+    // Alternatively, you could copy content from g_rightTexture to g_leftTexture
+    g_context->CopySubresourceRegion(
+        g_leftTexture.Get(),   // Destination texture (g_leftTexture)
+        0,                     // Destination mip level
+        0, 0, 0,               // Destination coordinates (top-left corner)
+        g_rightTexture.Get(),  // Source texture (g_rightTexture)
+        0,                     // Source mip level
+        &rightBox              // Source region (rightBox)
+    );
+}
+
+void InspectTexture(ComPtr<ID3D11Texture2D> texture, const std::string& name) {
+    // No HRESULT assignment, as CopyResource returns void
+    g_context->CopyResource(texture.Get(), texture.Get());
+
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    HRESULT hr = g_context->Map(texture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
+    std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
+
+    g_context->Unmap(texture.Get(), 0);
+}
+
+
+void CheckTextureValidity() {
+    if (!g_leftTexture || !g_leftTextureSRV) {
+        std::cerr << "Error: Left texture or SRV is not valid!" << std::endl;
+    }
+    if (!g_rightTexture || !g_rightTextureSRV) {
+        std::cerr << "Error: Right texture or SRV is not valid!" << std::endl;
+    }
+
+    std::cout << "All 4 left and right texture and textureSRVs are valid" << std::endl;
+}
+
+
 void SetShaderResources() {
     // Bind left and right texture SRVs to the pixel shader
     g_context->PSSetShaderResources(0, 1, g_leftTextureSRV.GetAddressOf());  // Slot 0
     std::cout << "g_leftTextureSRV set to 0,1 Shader Resource" << std::endl;
     g_context->PSSetShaderResources(1, 1, g_rightTextureSRV.GetAddressOf()); // Slot 1
-    std::cout << "g_rightTextureSRV set to 1,1 Shader Resource" << std::endl;
+    std::cout << "g_leftTextureSRV set to 1,1 Shader Resource" << std::endl;
 
 
 }
+
+
+void RenderTextures() {
+    
+    CheckTextureValidity();
+
+    // Set the input assembler and shaders
+    g_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);  // Use a triangle strip for a quad
+    g_context->IASetInputLayout(inputLayout.Get());  // Set the input layout (assuming you've set this up)
+    g_context->VSSetShader(vertexShader.Get(), nullptr, 0);  // Set the vertex shader
+    g_context->PSSetShader(pixelShader.Get(), nullptr, 0);  // Set the pixel shader
+
+    // Bind resources to the pipeline (textures)
+    SetShaderResources();  // This binds the SRVs for left and right textures
+
+    // Draw the quad or screen-sized primitive
+    g_context->Draw(4, 0); // Draw 4 vertices for the quad
+
+    std::cout << "Render Texture is done!, Drawing done!" << std::endl;
+}
+
+
+
 
 bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
     // Get the texture description
@@ -361,11 +443,11 @@ void InitializeShaders() {
 
 
 bool InitializeCaptureResources() {
-    HRESULT hr;
+    HRESULT hr1;
 
     // Create D3D11 device
     D3D_FEATURE_LEVEL featureLevel;
-    hr = D3D11CreateDevice(
+    hr1 = D3D11CreateDevice(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
@@ -377,45 +459,45 @@ bool InitializeCaptureResources() {
         &featureLevel,
         &g_context
     );
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create D3D11 device. HRESULT: " << std::hex << hr << std::endl;
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to create D3D11 device. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
     std::cout << "D3D11 device created successfully." << std::endl;
 
     // Get DXGI device and output
     ComPtr<IDXGIDevice> dxgiDevice;
-    hr = g_device.As(&dxgiDevice);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI device. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = g_device.As(&dxgiDevice);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to get DXGI device. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
 
     ComPtr<IDXGIAdapter> adapter;
-    hr = dxgiDevice->GetAdapter(&adapter);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI adapter. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = dxgiDevice->GetAdapter(&adapter);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to get DXGI adapter. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
 
     ComPtr<IDXGIOutput> output;
-    hr = adapter->EnumOutputs(0, &output);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI output. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = adapter->EnumOutputs(0, &output);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to get DXGI output. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
 
     ComPtr<IDXGIOutput1> output1;
-    hr = output.As(&output1);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI output1. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = output.As(&output1);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to get DXGI output1. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
 
     // Create duplication
-    hr = output1->DuplicateOutput(g_device.Get(), &g_duplication);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create desktop duplication. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = output1->DuplicateOutput(g_device.Get(), &g_duplication);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to create desktop duplication. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
     std::cout << "Desktop duplication created successfully." << std::endl;
@@ -432,15 +514,16 @@ bool InitializeCaptureResources() {
     halfDesc.Usage = D3D11_USAGE_DEFAULT;
     halfDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-    hr = g_device->CreateTexture2D(&halfDesc, nullptr, &g_leftTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create left texture. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = g_device->CreateTexture2D(&halfDesc, nullptr, &g_leftTexture);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to create left texture. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
+    InspectTexture(g_leftTexture, "g_leftTexture");
 
-    hr = g_device->CreateTexture2D(&halfDesc, nullptr, &g_rightTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create right texture. HRESULT: " << std::hex << hr << std::endl;
+    hr1 = g_device->CreateTexture2D(&halfDesc, nullptr, &g_rightTexture);
+    if (FAILED(hr1)) {
+        std::cerr << "Failed to create right texture. HRESULT: " << std::hex << hr1 << std::endl;
         return false;
     }
 
@@ -603,21 +686,46 @@ void CreateSwapChainForWindow(
     UINT width,
     UINT height
 ) {
+    HRESULT hr = S_OK;  // Declare the HRESULT variable
     // Define the swap chain description
     DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
     swapChainDesc.BufferCount = 1;
     swapChainDesc.BufferDesc.Width = width;
     swapChainDesc.BufferDesc.Height = height;
-    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;  // Choose a compatible format
+    swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
+    swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.OutputWindow = hwnd;
+    swapChainDesc.OutputWindow = hwnd;  // HWND for your window
     swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.Windowed = TRUE; // Fullscreen can be configured if needed
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapChainDesc.SampleDesc.Quality = 0;
+    swapChainDesc.Windowed = TRUE;  // Fullscreen or windowed mode
+
+    // Create the Swap Chain and the Device
+    hr = D3D11CreateDeviceAndSwapChain(
+        nullptr,                    // Use default adapter
+        D3D_DRIVER_TYPE_HARDWARE,   // Hardware accelerated rendering
+        nullptr,                    // No software rasterizer
+        0,                          // Flags (optional)
+        nullptr,                    // Feature levels (optional)
+        0,                          // Number of feature levels
+        D3D11_SDK_VERSION,          // SDK version
+        &swapChainDesc,             // Swap chain description
+        &swapChain,               // Output swap chain
+        &g_device,                  // Output device
+        nullptr,              // Output feature level
+        &g_context                  // Output device context
+    );
+
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create D3D11 device and swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+    std::cout << "Device and swap chain created successfully." << std::endl;
 
     // Create the Factory 
     ComPtr<IDXGIFactory1> factory;
-    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+    hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
     if (FAILED(hr)) {
         std::cerr << "Failed to create DXGI factory. HRESULT: " << std::hex << hr << std::endl;
         return;
@@ -679,38 +787,6 @@ void CreateSwapChainsForWindows(
 
     std::cout << "Finished creating RenderTargetView " << std::endl;
 }
-
-
-
-
-
-    void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> stagingTexture, const std::string & name) {
-        if (!stagingTexture || !texture) {
-            std::cerr << "One or both textures are null. Cannot inspect " << name << "." << std::endl;
-            return;
-        }
-
-        // No HRESULT assignment, as CopyResource returns void
-        g_context->CopyResource(stagingTexture.Get(), texture.Get());
-
-        D3D11_MAPPED_SUBRESOURCE mappedResource;
-        HRESULT hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
-        if (FAILED(hr)) {
-            std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
-            return;
-        }
-
-        uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
-        std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
-
-        g_context->Unmap(stagingTexture.Get(), 0);
-    }
-
-
-
-
-
-
 
 
 
@@ -784,17 +860,20 @@ int main() {
     CreateSwapChainsForWindows(g_leftSwapChain, g_rightSwapChain, leftRTV, rightRTV);
     CreateFullSCreenQuad();
 
-    CreateShaderResourceViews(); // To bind the textures to shaders texture
+    
 
     SetShaderResources();
-    //InitializeStagingTextures();
+    //initializeStagingTextures();
     
    
     //RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
 
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
     CaptureFrame();
-
+    CopyTextureContent();
+    //initializeStagingTextures();
+    CreateShaderResourceViews(); // To bind the textures to shaders texture
+    RenderTextures();
 
 
     /*while (true) {
