@@ -13,7 +13,7 @@
 #pragma comment(lib, "dxgi.lib")
 #include <chrono>
 #include <thread>
-
+#include <directxmath.h>
 
 
 
@@ -240,7 +240,7 @@ void CreateAndShowWindows(HINSTANCE hInstance) {
 }
 void CreateRenderTargetViewForSwapChain(ComPtr<IDXGISwapChain>& swapChain, ComPtr<ID3D11RenderTargetView>& rtv) {
 
-
+    /* It seems like this is for when you want to render actual stuff. But we have the pixel data so trying to bypass and just draw what we have. We still need RTVs but we can use them in a simpler way.
     // Get the back buffer from the swap chain
     ComPtr<ID3D11Texture2D> backBuffer;
     HRESULT hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
@@ -249,6 +249,24 @@ void CreateRenderTargetViewForSwapChain(ComPtr<IDXGISwapChain>& swapChain, ComPt
         return;
     }
 
+    // Create the render target view (RTV)
+    hr = g_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &rtv);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create render target view. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }*/
+
+    // Create the RTVs from the textures(assuming LeftBox and RightBox are already created as textures)
+
+    HRESULT hr = S_OK; // Declare and initialize hr
+
+    // Get the back buffer from the swap chain
+    ComPtr<ID3D11Texture2D> backBuffer;
+    hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get the back buffer from swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
     // Create the render target view (RTV)
     hr = g_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &rtv);
     if (FAILED(hr)) {
@@ -422,10 +440,23 @@ bool InitializeCaptureResources() {
     return true;
 }
 
-struct Vertex {
-    float x, y, z;
-    float u, v;
+struct Vertex
+{
+    DirectX::XMFLOAT3 position;
+    DirectX::XMFLOAT2 texCoord;
 };
+
+Vertex quadVertices[] =
+{
+    { DirectX::XMFLOAT3(-1.0f,  1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 0.0f) }, // Top-left
+    { DirectX::XMFLOAT3(1.0f,  1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 0.0f) }, // Top-right
+    { DirectX::XMFLOAT3(-1.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 1.0f) }, // Bottom-left
+
+    { DirectX::XMFLOAT3(1.0f,  1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 0.0f) }, // Top-right
+    { DirectX::XMFLOAT3(1.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 1.0f) }, // Bottom-right
+    { DirectX::XMFLOAT3(-1.0f, -1.0f, 0.0f), DirectX::XMFLOAT2(0.0f, 1.0f) }  // Bottom-left
+};
+
 
 
 void InitializeStagingTextures() {
@@ -458,7 +489,7 @@ void InitializeStagingTextures() {
 
 
 
-ComPtr<ID3D11Buffer> vertexBuffer;
+/*ComPtr<ID3D11Buffer> vertexBuffer;
 void CreateFullScreenQuad() {
     Vertex quadVertices[] = {
         { -1.0f, -1.0f, 0.0f, 0.0f, 1.0f },
@@ -482,8 +513,26 @@ void CreateFullScreenQuad() {
     }
 
     std::cout << "Created vertex buffer " << std::endl;
-}
+} */
+ComPtr<ID3D11Buffer> vertexBuffer;
+void CreateFullSCreenQuad() {
 
+    D3D11_BUFFER_DESC bufferDesc = {};
+    bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    bufferDesc.ByteWidth = sizeof(quadVertices);
+    bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = quadVertices;
+
+    HRESULT hr = g_device->CreateBuffer(&bufferDesc, &initData, &vertexBuffer);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create vertex buffer. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+    std::cout << "Vertex Buffer created." << std::endl;
+
+}
 
 void CreateShaderResourceViews() {
     HRESULT hr;
@@ -724,11 +773,12 @@ int main() {
 
     InitializeShaders();
     CreateSwapChainsForWindows(g_leftSwapChain, g_rightSwapChain, leftRTV, rightRTV);
-
+    InitializeShaders();
+    CreateFullSCreenQuad();
     //CreateShaderResourceViews(); // Call the function here
     //InitializeStagingTextures();
-    //InitializeShaders();
-    //CreateFullScreenQuad();
+    
+   
     //RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
 
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
