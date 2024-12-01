@@ -19,6 +19,8 @@ ComPtr<ID3D11VertexShader> g_vertexShader;
 ComPtr<ID3D11PixelShader> g_pixelShader;
 ComPtr<ID3D11Buffer> g_vertexBuffer;
 ComPtr<ID3D11InputLayout> g_inputLayout;
+ComPtr<IDXGISwapChain> g_swapChain;
+
 
 
 
@@ -57,6 +59,44 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     default:
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
+}
+bool CreateSwapChain(HWND hwnd) {
+    // Step 1: Create the DXGI_SWAP_CHAIN_DESC
+    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+    swapChainDesc.BufferCount = 1;                         // Number of buffers (for double buffering)
+    swapChainDesc.BufferDesc.Width = 800;                   // Width of the window (adjust as needed)
+    swapChainDesc.BufferDesc.Height = 600;                  // Height of the window (adjust as needed)
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;  // Color format
+    swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;    // Refresh rate (adjust as needed)
+    swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; // The swap chain will be used for rendering
+    swapChainDesc.OutputWindow = hwnd;                       // Window handle
+    swapChainDesc.SampleDesc.Count = 1;                      // No multi-sampling (you can enable it later)
+    swapChainDesc.Windowed = TRUE;                           // Windowed mode (set to FALSE for full screen)
+
+    // Step 2: Create the swap chain
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr,                      // Default adapter
+        D3D_DRIVER_TYPE_HARDWARE,      // Use hardware rendering
+        nullptr,                      // No external software rasterizer
+        0,                             // Flags (none)
+        nullptr,                      // Feature levels (use default)
+        0,                             // Count of feature levels
+        D3D11_SDK_VERSION,            // SDK version
+        &swapChainDesc,               // Swap chain description
+        &g_swapChain,                 // Out parameter for the swap chain
+        &g_device,                    // Out parameter for the device
+        nullptr,                      // Out parameter for the feature level
+        &g_context                    // Out parameter for the device context
+    );
+
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    std::cout << "Swap chain created successfully." << std::endl;
+    return true;
 }
 
 bool CreateRenderWindow() {
@@ -377,6 +417,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         return -1;
     }
 
+
+    //Loadshaders calls createinputlayout
+    if (!CreateSwapChain(g_hwnd)) {
+        return -1;
+    }
+
+    
 
     while (true) {
         if (!CaptureFrame()) {
