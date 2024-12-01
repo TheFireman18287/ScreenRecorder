@@ -43,7 +43,27 @@ void CreateSwapChainForMonitor(
     ComPtr<IDXGISwapChain>& swapChain,
     const wchar_t* windowTitle
 );
+void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> stagingTexture, const std::string& name) {
+    if (!stagingTexture || !texture) {
+        std::cerr << "One or both textures are null. Cannot inspect " << name << "." << std::endl;
+        return;
+    }
 
+    // No HRESULT assignment, as CopyResource returns void
+    g_context->CopyResource(stagingTexture.Get(), texture.Get());
+
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    HRESULT hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
+    std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
+
+    g_context->Unmap(stagingTexture.Get(), 0);
+}
 
 bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
     // Get the texture description
@@ -207,7 +227,7 @@ int CALLBACK WinMain(
     freopen_s(&consoleOutput, "CONOUT$", "w", stderr);
 
     std::cout << "Console attached. Starting application..." << std::endl;
-   
+
     return main();
 }
 
@@ -420,6 +440,10 @@ void CreateShaderResourceViews() {
 
     // Left texture
     hr = g_device->CreateShaderResourceView(g_leftTexture.Get(), nullptr, &g_leftTextureSRV);
+
+    std::cout << "Calling Inspect Texture from CreateShaderResourceView:" << std::endl;
+    InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
+    InspectTexture(g_rightTexture, g_rightStagingTexture, "Right Texture");
     if (FAILED(hr)) {
         std::cerr << "Failed to create SRV for left texture. HRESULT: " << std::hex << hr << std::endl;
     }
@@ -481,6 +505,7 @@ HWND CreateRenderWindow(const wchar_t* title) {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = L"DirectXWindow";
 
+
     // Register the window class
     RegisterClass(&wc);
 
@@ -489,7 +514,7 @@ HWND CreateRenderWindow(const wchar_t* title) {
         0,
         wc.lpszClassName,
         title,
-        WS_OVERLAPPEDWINDOW,  // Allow resizing and moving
+        WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU,  // Allow resizing and moving
         CW_USEDEFAULT, CW_USEDEFAULT,
         2560, 1440,           // Default size
         nullptr,
@@ -537,31 +562,11 @@ void InitializeMonitorsAndSwapChains(ComPtr<IDXGISwapChain>& leftSwapChain, ComP
     }
 }
 
-void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> stagingTexture, const std::string& name) {
-    if (!stagingTexture || !texture) {
-        std::cerr << "One or both textures are null. Cannot inspect " << name << "." << std::endl;
-        return;
-    }
-
-    // No HRESULT assignment, as CopyResource returns void
-    g_context->CopyResource(stagingTexture.Get(), texture.Get());
-
-    D3D11_MAPPED_SUBRESOURCE mappedResource;
-    HRESULT hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
-        return;
-    }
-
-    uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
-    std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
-
-    g_context->Unmap(stagingTexture.Get(), 0);
-}
 
 
 
-void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain) {
+
+void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain, ComPtr<ID3D11ShaderResourceView> leftTextureSRV, ComPtr<ID3D11ShaderResourceView> rightTextureSRV) {
     HRESULT hr;
     // Check if the device and context are valid
     if (!g_device || !g_context) {
@@ -584,7 +589,7 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
 
 
 
-     // Render the left texture
+    // Render the left texture
     ComPtr<ID3D11Texture2D> leftBackBuffer;
     hr = leftSwapChain->GetBuffer(0, IID_PPV_ARGS(&leftBackBuffer));
     if (SUCCEEDED(hr)) {
@@ -600,7 +605,7 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
 
             // Additional rendering steps (binding shaders, drawing, etc.)
             // g_context->Draw(...);
-
+            g_context->Draw(4, 0);  // Drawing a quad (4 vertices)
             // Present the left swap chain
             leftSwapChain->Present(1, 0);
             std::cout << "Left texture presented." << std::endl;
@@ -629,6 +634,7 @@ void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChai
 
             // Additional rendering steps (binding shaders, drawing, etc.)
             // g_context->Draw(...);
+            g_context->Draw(4, 0);  // Drawing a quad (4 vertices)
 
             // Present the right swap chain
             rightSwapChain->Present(1, 0);
@@ -684,7 +690,7 @@ bool CaptureFrame() {
     // Save left and right textures as PNG files
 
     // Commenting out image creation for now
-    
+
     static int frameIndex = 0;
     wchar_t leftFilename[128];
     wchar_t rightFilename[128];
@@ -695,10 +701,10 @@ bool CaptureFrame() {
     SaveTextureAsPNGStandalone(g_device.Get(), g_context.Get(), g_rightTexture.Get(), rightFilename);
 
     frameIndex++;
-    
 
 
-    
+
+
     return true;
 }
 
@@ -715,7 +721,7 @@ int main() {
         return -1;
     }
 
-    
+    CaptureFrame();
     //InitializeCaptureResources();
     //InitializeShaders();
     InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
@@ -723,7 +729,7 @@ int main() {
     InitializeStagingTextures();
     InitializeShaders();
     CreateFullScreenQuad();
-    RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
+    //RenderToMonitors(g_leftSwapChain, g_rightSwapChain, g_leftTextureSRV, g_rightTextureSRV);
 
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
 
@@ -747,11 +753,7 @@ int main() {
 
 
     //InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
-    std::cin.get(); // Wait for user input before exiting
-    // Add this after rendering the first frame
-    std::cout << "Pausing for 10 seconds to inspect the output..." << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(999));
+    while(true);
     CoUninitialize();
     return 0;
 }
-
