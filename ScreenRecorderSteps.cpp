@@ -167,8 +167,14 @@ bool LoadShaders() {
     }
     g_device->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(), nullptr, &g_pixelShader);
 
+    // Create the input layout
+    if (!CreateInputLayout(vertexShaderBlob)) {
+        return false;  // If input layout creation fails, return false
+    }
+
     return true;  // Return true if everything succeeded
 }
+
 
 
 
@@ -359,10 +365,11 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     if (!InitializeDeviceAndDuplication()) {
         return -1;
     }
-
+    //Loadshaders calls createinputlayout
     if (!LoadShaders()) {
         return -1;
     }
+
 
     while (true) {
         if (!CaptureFrame()) {
