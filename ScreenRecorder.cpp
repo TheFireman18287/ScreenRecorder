@@ -14,8 +14,6 @@
 #include <chrono>
 #include <thread>
 
-HWND CreateRenderWindow(const wchar_t* title);
-
 
 
 
@@ -29,6 +27,7 @@ ComPtr<ID3D11Texture2D> g_leftTexture;
 ComPtr<ID3D11Texture2D> g_rightTexture;
 ComPtr<IDXGISwapChain> g_leftSwapChain;
 ComPtr<IDXGISwapChain> g_rightSwapChain;
+ComPtr<IDXGISwapChain> swapChain;
 ComPtr<ID3D11VertexShader> vertexShader;
 ComPtr<ID3D11PixelShader> pixelShader;
 ComPtr<ID3D11InputLayout> inputLayout;
@@ -36,34 +35,12 @@ ComPtr<ID3D11ShaderResourceView> g_leftTextureSRV;
 ComPtr<ID3D11ShaderResourceView> g_rightTextureSRV;
 ComPtr<ID3D11Texture2D> g_leftStagingTexture;
 ComPtr<ID3D11Texture2D> g_rightStagingTexture;
+ComPtr<ID3D11RenderTargetView> leftRTV; 
+ComPtr<ID3D11RenderTargetView> rightRTV;
+//Global variables continue - Split the captured frame into left and right halves
+D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };
+D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 }; 
 
-
-void CreateSwapChainForMonitor(
-    ComPtr<IDXGIOutput> output,
-    ComPtr<IDXGISwapChain>& swapChain,
-    const wchar_t* windowTitle
-);
-void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> stagingTexture, const std::string& name) {
-    if (!stagingTexture || !texture) {
-        std::cerr << "One or both textures are null. Cannot inspect " << name << "." << std::endl;
-        return;
-    }
-
-    // No HRESULT assignment, as CopyResource returns void
-    g_context->CopyResource(stagingTexture.Get(), texture.Get());
-
-    D3D11_MAPPED_SUBRESOURCE mappedResource;
-    HRESULT hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
-        return;
-    }
-
-    uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
-    std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
-
-    g_context->Unmap(stagingTexture.Get(), 0);
-}
 
 bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
     // Get the texture description
@@ -209,6 +186,76 @@ bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* conte
     context->Unmap(stagingTexture.Get(), 0);
     return true;
 }
+// Function to handle window messages (message loop)
+void WindowMessageLoop(HWND hWnd) {
+    MSG msg;
+    BOOL gResult;
+    while ((gResult = GetMessage(&msg, hWnd, 0, 0)) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+
+void CreateAndShowWindows(HINSTANCE hInstance) {
+    const auto pClassName = L"SalarWindowClass";
+
+    // Register window class
+    WNDCLASSEX wc = { 0 };
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_OWNDC;
+    wc.cbClsExtra = 0;
+    wc.cbWndExtra = 0;
+    wc.hInstance = hInstance;
+    wc.hIcon = nullptr;
+    wc.hCursor = nullptr;
+    wc.hbrBackground = nullptr;
+    wc.lpfnWndProc = DefWindowProc; // Use the default window procedure
+    wc.lpszMenuName = nullptr;
+    wc.lpszClassName = pClassName;
+    wc.hIconSm = nullptr;
+    RegisterClassEx(&wc);
+
+    // Create window instance 1
+    HWND hWnd1 = CreateWindowEx(
+        0, pClassName,
+        L"WindowInstance1",
+        WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU,
+        200, 200, 2560, 1440,
+        nullptr, nullptr, hInstance, nullptr
+    );
+
+    // Create window instance 2
+    HWND hWnd2 = CreateWindowEx(
+        0, pClassName,
+        L"WindowInstance2",
+        WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU,
+        2560, 200, 2560, 1440,
+        nullptr, nullptr, hInstance, nullptr
+    );
+
+    // Show both windows
+    ShowWindow(hWnd1, SW_SHOW);
+    ShowWindow(hWnd2, SW_SHOW);
+    return;
+}
+void CreateRenderTargetViewForSwapChain(ComPtr<IDXGISwapChain>& swapChain, ComPtr<ID3D11RenderTargetView>& rtv) {
+
+
+    // Get the back buffer from the swap chain
+    ComPtr<ID3D11Texture2D> backBuffer;
+    HRESULT hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get the back buffer from swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Create the render target view (RTV)
+    hr = g_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &rtv);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create render target view. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+}
 
 
 // Redirect WinMain to main
@@ -228,6 +275,9 @@ int CALLBACK WinMain(
 
     std::cout << "Console attached. Starting application..." << std::endl;
 
+    //std::cout << "Creating window Instances..." << std::endl;
+    //CreateAndShowWindows(hInstance);
+   
     return main();
 }
 
@@ -440,10 +490,6 @@ void CreateShaderResourceViews() {
 
     // Left texture
     hr = g_device->CreateShaderResourceView(g_leftTexture.Get(), nullptr, &g_leftTextureSRV);
-
-    std::cout << "Calling Inspect Texture from CreateShaderResourceView:" << std::endl;
-    InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
-    InspectTexture(g_rightTexture, g_rightStagingTexture, "Right Texture");
     if (FAILED(hr)) {
         std::cerr << "Failed to create SRV for left texture. HRESULT: " << std::hex << hr << std::endl;
     }
@@ -461,42 +507,6 @@ void CreateShaderResourceViews() {
     }
 }
 
-void CreateSwapChainForMonitor(
-    ComPtr<IDXGIOutput> output,
-    ComPtr<IDXGISwapChain>& swapChain,
-    const wchar_t* windowTitle
-) {
-    // Create a window for this monitor
-    HWND hwnd = CreateRenderWindow(windowTitle);
-
-    // Define the swap chain description
-    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-    swapChainDesc.BufferCount = 1;
-    swapChainDesc.BufferDesc.Width = 2560;  // Match half width
-    swapChainDesc.BufferDesc.Height = 1440; // Match height
-    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.OutputWindow = hwnd;
-    swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.Windowed = TRUE; // Fullscreen can be configured if needed
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    // Create the swap chain
-    ComPtr<IDXGIFactory1> factory;
-    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create DXGI factory. HRESULT: " << std::hex << hr << std::endl;
-        return;
-    }
-
-    hr = factory->CreateSwapChain(g_device.Get(), &swapChainDesc, &swapChain);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create swap chain for monitor. HRESULT: " << std::hex << hr << std::endl;
-    }
-    else {
-        std::wcout << L"Swap chain created for monitor: " << windowTitle << std::endl;
-    }
-}
 
 HWND CreateRenderWindow(const wchar_t* title) {
     // Define a simple window class
@@ -529,125 +539,116 @@ HWND CreateRenderWindow(const wchar_t* title) {
     return hwnd;
 }
 
+void CreateSwapChainForWindow(
+    HWND hwnd,
+    ComPtr<IDXGISwapChain>& swapChain,
+    UINT width,
+    UINT height
+) {
+    // Define the swap chain description
+    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+    swapChainDesc.BufferCount = 1;
+    swapChainDesc.BufferDesc.Width = width;
+    swapChainDesc.BufferDesc.Height = height;
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.OutputWindow = hwnd;
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.Windowed = TRUE; // Fullscreen can be configured if needed
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
-
-void InitializeMonitorsAndSwapChains(ComPtr<IDXGISwapChain>& leftSwapChain, ComPtr<IDXGISwapChain>& rightSwapChain) {
-    // Create a DXGI Factory
+    // Create the Factory 
     ComPtr<IDXGIFactory1> factory;
     HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
     if (FAILED(hr)) {
         std::cerr << "Failed to create DXGI factory. HRESULT: " << std::hex << hr << std::endl;
         return;
     }
-
-    // Enumerate adapters
-    ComPtr<IDXGIAdapter> adapter;
-    for (UINT adapterIndex = 0; factory->EnumAdapters(adapterIndex, &adapter) != DXGI_ERROR_NOT_FOUND; ++adapterIndex) {
-        ComPtr<IDXGIOutput> output;
-
-        // Enumerate outputs (monitors)
-        for (UINT outputIndex = 0; adapter->EnumOutputs(outputIndex, &output) != DXGI_ERROR_NOT_FOUND; ++outputIndex) {
-            DXGI_OUTPUT_DESC desc;
-            output->GetDesc(&desc);
-            std::wcout << L"Monitor found: " << desc.DeviceName << std::endl;
-
-            // Create swap chains for the first two monitors
-            if (outputIndex == 0) {
-                CreateSwapChainForMonitor(output, leftSwapChain, L"Left Monitor");
-            }
-            else if (outputIndex == 1) {
-                CreateSwapChainForMonitor(output, rightSwapChain, L"Right Monitor");
-            }
-        }
+    // Create the swap chain
+    hr = factory->CreateSwapChain(g_device.Get(), &swapChainDesc, &swapChain);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
     }
+
+    // Check if swapChain is valid after creation
+    if (!swapChain) {
+        std::cerr << "Error: swapChain is still null after creation!" << std::endl;
+        return;
+    }
+
+    std::cout << "Swap chain created successfully! From inside CreateSwapChainForWindowFunction " << std::endl;
 }
 
 
+void CreateSwapChainsForWindows(
+    ComPtr<IDXGISwapChain>& leftSwapChain,
+    ComPtr<IDXGISwapChain>& rightSwapChain,
+    ComPtr<ID3D11RenderTargetView>& leftRTV,
+    ComPtr<ID3D11RenderTargetView>& rightRTV
+) {
+    // Create a window for the left and right render targets
+    HWND hwndLeft = CreateRenderWindow(L"Left Window");
+    HWND hwndRight = CreateRenderWindow(L"Right Window");
 
+    std::cout << "Finished creating windows "<< std::endl;
 
+    // Create the swap chains for the windows
+    CreateSwapChainForWindow(hwndLeft, leftSwapChain, 2560, 1440);
+    CreateSwapChainForWindow(hwndRight, rightSwapChain, 2560, 1440);
 
-void RenderToMonitors(ComPtr<IDXGISwapChain> leftSwapChain, ComPtr<IDXGISwapChain> rightSwapChain, ComPtr<ID3D11ShaderResourceView> leftTextureSRV, ComPtr<ID3D11ShaderResourceView> rightTextureSRV) {
-    HRESULT hr;
-    // Check if the device and context are valid
+    std::cout << "Finished creating Swap Chains. " << std::endl;
+
+    if (!leftSwapChain) {
+        std::cerr << "Error: leftSwapChain is null!" << std::endl;
+    }
+
+    if (!rightSwapChain) {
+        std::cerr << "Error: rightSwapChain is null!" << std::endl;
+        return;
+    }
+
     if (!g_device || !g_context) {
         std::cerr << "Device or context is null!" << std::endl;
         return;
     }
 
-    // Make sure swap chains are valid
-    if (!leftSwapChain || !rightSwapChain) {
-        std::cerr << "One or both swap chains are null!" << std::endl;
-        return;
-    }
 
-    // Optionally, log swap chain details to ensure they are correct
-    std::cout << "Rendering to Left Swap Chain: " << leftSwapChain.Get() << std::endl;
-    std::cout << "Rendering to Right Swap Chain: " << rightSwapChain.Get() << std::endl;
-    std::cout << "\nCalling InspectTexture for left and right texture from RenderToMonotor!\n " << rightSwapChain.Get() << std::endl;
-    InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
-    InspectTexture(g_rightTexture, g_rightStagingTexture, "Right Texture");
+    std::cout << "Starting to create RenderView for Swapchains. " << std::endl;
+    // Now create the render target views for the swap chains
+    CreateRenderTargetViewForSwapChain(leftSwapChain, leftRTV);
+    CreateRenderTargetViewForSwapChain(rightSwapChain, rightRTV);
 
-
-
-    // Render the left texture
-    ComPtr<ID3D11Texture2D> leftBackBuffer;
-    hr = leftSwapChain->GetBuffer(0, IID_PPV_ARGS(&leftBackBuffer));
-    if (SUCCEEDED(hr)) {
-        ComPtr<ID3D11RenderTargetView> leftRTV;
-        hr = g_device->CreateRenderTargetView(leftBackBuffer.Get(), nullptr, &leftRTV);
-        if (SUCCEEDED(hr)) {
-            // Set the render target view for the left swap chain
-            g_context->OMSetRenderTargets(1, leftRTV.GetAddressOf(), nullptr);
-
-            // Optional: clear the render target before drawing
-            const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
-            g_context->ClearRenderTargetView(leftRTV.Get(), clearColor);
-
-            // Additional rendering steps (binding shaders, drawing, etc.)
-            // g_context->Draw(...);
-            g_context->Draw(4, 0);  // Drawing a quad (4 vertices)
-            // Present the left swap chain
-            leftSwapChain->Present(1, 0);
-            std::cout << "Left texture presented." << std::endl;
-        }
-        else {
-            std::cerr << "Failed to create Render Target View for Left texture. HRESULT: " << std::hex << hr << std::endl;
-        }
-    }
-    else {
-        std::cerr << "Failed to get left back buffer. HRESULT: " << std::hex << hr << std::endl;
-    }
-
-    // Render the right texture
-    ComPtr<ID3D11Texture2D> rightBackBuffer;
-    hr = rightSwapChain->GetBuffer(0, IID_PPV_ARGS(&rightBackBuffer));
-    if (SUCCEEDED(hr)) {
-        ComPtr<ID3D11RenderTargetView> rightRTV;
-        hr = g_device->CreateRenderTargetView(rightBackBuffer.Get(), nullptr, &rightRTV);
-        if (SUCCEEDED(hr)) {
-            // Set the render target view for the right swap chain
-            g_context->OMSetRenderTargets(1, rightRTV.GetAddressOf(), nullptr);
-
-            // Optional: clear the render target before drawing
-            const float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f }; // Gray
-            g_context->ClearRenderTargetView(rightRTV.Get(), clearColor);
-
-            // Additional rendering steps (binding shaders, drawing, etc.)
-            // g_context->Draw(...);
-            g_context->Draw(4, 0);  // Drawing a quad (4 vertices)
-
-            // Present the right swap chain
-            rightSwapChain->Present(1, 0);
-            std::cout << "Right texture presented." << std::endl;
-        }
-        else {
-            std::cerr << "Failed to create Render Target View for Right texture. HRESULT: " << std::hex << hr << std::endl;
-        }
-    }
-    else {
-        std::cerr << "Failed to get right back buffer. HRESULT: " << std::hex << hr << std::endl;
-    }
+    std::cout << "Finished creating RenderTargetView " << std::endl;
 }
+
+
+
+
+
+    void InspectTexture(ComPtr<ID3D11Texture2D> texture, ComPtr<ID3D11Texture2D> stagingTexture, const std::string & name) {
+        if (!stagingTexture || !texture) {
+            std::cerr << "One or both textures are null. Cannot inspect " << name << "." << std::endl;
+            return;
+        }
+
+        // No HRESULT assignment, as CopyResource returns void
+        g_context->CopyResource(stagingTexture.Get(), texture.Get());
+
+        D3D11_MAPPED_SUBRESOURCE mappedResource;
+        HRESULT hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+        if (FAILED(hr)) {
+            std::cerr << "Failed to map " << name << ". HRESULT: " << std::hex << hr << std::endl;
+            return;
+        }
+
+        uint32_t* data = static_cast<uint32_t*>(mappedResource.pData);
+        std::cout << "First pixel in " << name << " RGBA: " << std::hex << *data << std::endl;
+
+        g_context->Unmap(stagingTexture.Get(), 0);
+    }
+
+
 
 
 
@@ -676,9 +677,7 @@ bool CaptureFrame() {
         return false;
     }
 
-    // Split the captured frame into left and right halves
-    D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };
-    D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 };
+
 
     g_context->CopySubresourceRegion(g_leftTexture.Get(), 0, 0, 0, 0, capturedTexture.Get(), 0, &leftBox);
     g_context->CopySubresourceRegion(g_rightTexture.Get(), 0, 0, 0, 0, capturedTexture.Get(), 0, &rightBox);
@@ -720,18 +719,20 @@ int main() {
         CoUninitialize();
         return -1;
     }
+   
+  
 
-    CaptureFrame();
-    //InitializeCaptureResources();
-    //InitializeShaders();
-    InitializeMonitorsAndSwapChains(g_leftSwapChain, g_rightSwapChain);
-    CreateShaderResourceViews(); // Call the function here
-    InitializeStagingTextures();
     InitializeShaders();
-    CreateFullScreenQuad();
-    //RenderToMonitors(g_leftSwapChain, g_rightSwapChain, g_leftTextureSRV, g_rightTextureSRV);
+    CreateSwapChainsForWindows(g_leftSwapChain, g_rightSwapChain, leftRTV, rightRTV);
+
+    //CreateShaderResourceViews(); // Call the function here
+    //InitializeStagingTextures();
+    //InitializeShaders();
+    //CreateFullScreenQuad();
+    //RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
 
     std::cout << "Initialization complete. Capturing frames..." << std::endl;
+    CaptureFrame();
 
 
 
@@ -747,13 +748,16 @@ int main() {
 
     } */
 
-    //CaptureFrame();
+    
     //RenderToMonitors(g_leftSwapChain, g_rightSwapChain);
 
 
 
     //InspectTexture(g_leftTexture, g_leftStagingTexture, "Left Texture");
-    while(true);
+    std::cin.get(); // Wait for user input before exiting
+    // Add this after rendering the first frame
+    std::cout << "Pausing for 10 seconds to inspect the output..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(999));
     CoUninitialize();
     return 0;
 }
