@@ -20,7 +20,8 @@ ComPtr<ID3D11PixelShader> g_pixelShader;
 ComPtr<ID3D11Buffer> g_vertexBuffer;
 ComPtr<ID3D11InputLayout> g_inputLayout;
 ComPtr<IDXGISwapChain> g_swapChain;
-
+Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_leftSRV;
+Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_rightSRV;
 
 
 
@@ -60,6 +61,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 }
+
+
+void CreateSRVs() {
+    // Create Shader Resource Views (SRVs) for the textures
+    g_device->CreateShaderResourceView(g_leftTexture.Get(), nullptr, &g_leftSRV);
+    g_device->CreateShaderResourceView(g_rightTexture.Get(), nullptr, &g_rightSRV);
+    std::cout << "Left and right SRVs created from g_left and right textures!" << std::endl;
+}
+
 bool CreateSwapChain(HWND hwnd) {
     // Step 1: Create the DXGI_SWAP_CHAIN_DESC
     DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
@@ -430,6 +440,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             std::cerr << "Error capturing frame." << std::endl;
             break;
         }
+        CreateSRVs();
     }
 
     return 0;
