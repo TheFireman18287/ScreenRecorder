@@ -131,12 +131,15 @@ void CreateTextures() {
     // Draw the quad with the right texture
     g_context->Draw(4, 0);  // Draw the right texture quad
 }*/
+
+
+
 void CaptureBackbufferAndSave() {
     // Get the backbuffer from the swap chain
     ComPtr<ID3D11Texture2D> backBuffer;
     HRESULT hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
     if (FAILED(hr)) {
-        std::cerr << "Failed to get swap chain back buffer!" << std::endl;
+        std::cerr << "Failed to get swap chain back buffer! HRESULT: 0x" << std::hex << hr << std::dec << std::endl;
         return;
     }
 
@@ -147,10 +150,15 @@ void CaptureBackbufferAndSave() {
     desc.BindFlags = 0;
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;  // Allow CPU access to the texture data
 
+    // Ensure we set the format to one that supports CPU access
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // Common format for staging textures
+    // You can add a check here if desc.Width or desc.Height is too large
+
+    // Create the staging texture
     ComPtr<ID3D11Texture2D> stagingTexture;
     hr = g_device->CreateTexture2D(&desc, nullptr, &stagingTexture);
     if (FAILED(hr)) {
-        std::cerr << "Failed to create staging texture!" << std::endl;
+        std::cerr << "Failed to create staging texture! HRESULT: 0x" << std::hex << hr << std::dec << std::endl;
         return;
     }
 
@@ -161,7 +169,7 @@ void CaptureBackbufferAndSave() {
     D3D11_MAPPED_SUBRESOURCE mappedData;
     hr = g_context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedData);
     if (FAILED(hr)) {
-        std::cerr << "Failed to map staging texture!" << std::endl;
+        std::cerr << "Failed to map staging texture! HRESULT: 0x" << std::hex << hr << std::dec << std::endl;
         return;
     }
 
@@ -184,12 +192,14 @@ void CaptureBackbufferAndSave() {
     if (stbi_write_png("captured_image.png", width, height, 4, imageData.data(), width * 4) == 0) {
         std::cerr << "Failed to save image as PNG!" << std::endl;
     }
+    else {
+        std::cout << "Image saved as 'captured_image.png'" << std::endl;
+    }
 
     // Unmap the staging texture
     g_context->Unmap(stagingTexture.Get(), 0);
-
-    std::cout << "Image saved as 'captured_image.png'" << std::endl;
 }
+
 
 void RenderTextures() {
     // Set the input layout and primitive topology
