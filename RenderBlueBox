@@ -1,0 +1,157 @@
+#include <d3d11.h>
+#include <dxgi.h>
+#include <windows.h>
+#include <iostream>
+#include <wrl/client.h>
+
+using Microsoft::WRL::ComPtr;
+
+// Global variables
+ComPtr<ID3D11Device> g_device;
+ComPtr<ID3D11DeviceContext> g_context;
+ComPtr<IDXGISwapChain> g_swapChain;
+ComPtr<ID3D11RenderTargetView> g_renderTargetView;
+
+void CreateDeviceAndSwapChain(HWND hwnd) {
+    HRESULT hr = S_OK;
+
+    // Swap chain description
+    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+    swapChainDesc.BufferCount = 1;
+    swapChainDesc.BufferDesc.Width = 800; // Window width
+    swapChainDesc.BufferDesc.Height = 600; // Window height
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
+    swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.OutputWindow = hwnd;  // Window handle
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.SampleDesc.Quality = 0;
+    swapChainDesc.Windowed = TRUE;
+
+    // Create device and swap chain
+    hr = D3D11CreateDeviceAndSwapChain(
+        nullptr,                    // Default adapter
+        D3D_DRIVER_TYPE_HARDWARE,   // Hardware rendering
+        nullptr,                    // No software rasterizer
+        0,                          // No flags
+        nullptr,                    // No feature levels
+        0,                          // No feature levels
+        D3D11_SDK_VERSION,          // SDK version
+        &swapChainDesc,             // Swap chain description
+        &g_swapChain,               // Output swap chain
+        &g_device,                  // Output device
+        nullptr,                    // Output feature level (optional)
+        &g_context                  // Output device context
+    );
+
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create D3D11 device and swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+    std::cout << "Device and swap chain created successfully." << std::endl;
+}
+
+void CreateRenderTargetView() {
+    // Get the back buffer from the swap chain
+    ComPtr<ID3D11Texture2D> backBuffer;
+    HRESULT hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get back buffer from swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Create render target view (RTV) from the back buffer
+    hr = g_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &g_renderTargetView);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create render target view. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Set the render target view
+    g_context->OMSetRenderTargets(1, g_renderTargetView.GetAddressOf(), nullptr);
+}
+
+void RenderLoop(HWND hwnd) {
+    // Set up the render target
+    CreateRenderTargetView();
+
+    // Set the viewport (this should match the window size)
+    D3D11_VIEWPORT viewport = {};
+    viewport.Width = 800;  // Match window size
+    viewport.Height = 600;
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    g_context->RSSetViewports(1, &viewport);
+
+    // Clear the render target to a color (optional)
+    float clearColor[] = { 0.0f, 0.0f, 1.0f, 1.0f };  // Blue color
+    g_context->ClearRenderTargetView(g_renderTargetView.Get(), clearColor);
+
+    // Drawing commands here (e.g., draw a triangle, quad, etc.)
+
+    // Present the swap chain (this shows the rendered content)
+    g_swapChain->Present(1, 0);
+}
+
+void Cleanup() {
+    // Resources are automatically released by the ComPtr, but it's good practice to reset them manually if needed.
+    g_renderTargetView.Reset();
+    g_swapChain.Reset();
+    g_context.Reset();
+    g_device.Reset();
+}
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_SIZE:
+        // Handle resizing (optional)
+        break;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow) {
+    // Initialize Win32 window (this should be done before creating the device)
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"Direct3D11WindowClass";
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0, wc.lpszClassName, L"Direct3D 11 Window", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, nullptr, nullptr, hInstance, nullptr
+    );
+
+    if (!hwnd) {
+        std::cerr << "Failed to create window." << std::endl;
+        return -1;
+    }
+
+    ShowWindow(hwnd, nCmdShow);
+
+    // Create device and swap chain
+    CreateDeviceAndSwapChain(hwnd);
+
+    // Main render loop
+    MSG msg = {};
+    while (msg.message != WM_QUIT) {
+        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        else {
+            // Render the scene
+            RenderLoop(hwnd);
+        }
+    }
+
+    Cleanup();
+    return 0;
+}
