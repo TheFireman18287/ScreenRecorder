@@ -22,6 +22,9 @@ ComPtr<ID3D11InputLayout> g_inputLayout;
 ComPtr<IDXGISwapChain> g_swapChain;
 Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_leftSRV;
 Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_rightSRV;
+Microsoft::WRL::ComPtr<ID3D11RenderTargetView> g_leftRenderTargetView;
+Microsoft::WRL::ComPtr<ID3D11RenderTargetView> g_rightRenderTargetView;
+Microsoft::WRL::ComPtr<ID3D11SamplerState> g_sampler;
 
 
 
@@ -60,6 +63,50 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     default:
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
+}
+
+void CreateSamplerState() {
+    D3D11_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    samplerDesc.MipLODBias = 0.0f;
+    samplerDesc.MaxAnisotropy = 1;
+    samplerDesc.BorderColor[0] = 0.0f;
+    samplerDesc.BorderColor[1] = 0.0f;
+    samplerDesc.BorderColor[2] = 0.0f;
+    samplerDesc.BorderColor[3] = 0.0f;
+    samplerDesc.MinLOD = 0;
+    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
+    HRESULT hr = g_device->CreateSamplerState(&samplerDesc, &g_sampler);
+    if (FAILED(hr)) {
+        // Handle error (you might want to log or exit)
+        std::cerr << "Failed to create sampler state." << std::endl;
+    }
+
+    std::cout << "SamplerState created Sucessfully." << std::endl;
+}
+
+
+void CreateRenderTargetViews() {
+    // Create the render target view for the left texture
+    HRESULT hr = g_device->CreateRenderTargetView(g_leftTexture.Get(), nullptr, &g_leftRenderTargetView);
+    if (FAILED(hr)) {
+        // Handle error (you might want to log or exit)
+        std::cerr << "Failed to create render target view for left texture." << std::endl;
+    }
+
+    // Create the render target view for the right texture
+    hr = g_device->CreateRenderTargetView(g_rightTexture.Get(), nullptr, &g_rightRenderTargetView);
+    if (FAILED(hr)) {
+        // Handle error (you might want to log or exit)
+        std::cerr << "Failed to create render target view for right texture." << std::endl;
+    }
+
+    std::cout << "Left and right renderTargetview created from left and right textures!" << std::endl;
 }
 
 
@@ -433,7 +480,11 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         return -1;
     }
 
+    //Create the renderrtargetview
+    CreateRenderTargetViews();
     
+    //Create Sampler State
+    CreateSamplerState();
 
     while (true) {
         if (!CaptureFrame()) {
