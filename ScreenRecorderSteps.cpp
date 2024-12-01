@@ -17,10 +17,134 @@ ComPtr<ID3D11Texture2D> g_leftTexture;
 ComPtr<ID3D11Texture2D> g_rightTexture;
 ComPtr<ID3D11VertexShader> g_vertexShader;
 ComPtr<ID3D11PixelShader> g_pixelShader;
+ComPtr<ID3D11Buffer> g_vertexBuffer;
+ComPtr<ID3D11InputLayout> g_inputLayout;
+
+
 
 
 D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };  // Adjust resolution as needed
 D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 };
+
+//Define vertex data for full screen quad
+struct Vertex {
+    float position[3];
+    float texCoord[2];
+};
+
+Vertex vertices[] = {
+    // Positions         // Texture Coordinates
+    { {-1.0f,  1.0f, 0.0f}, {0.0f, 0.0f} }, // Top-left
+    { { 1.0f,  1.0f, 0.0f}, {1.0f, 0.0f} }, // Top-right
+    { {-1.0f, -1.0f, 0.0f}, {0.0f, 1.0f} }, // Bottom-left
+    { { 1.0f, -1.0f, 0.0f}, {1.0f, 1.0f} }, // Bottom-right
+};
+
+
+//List of functions (latest first)
+
+
+// Global variables
+HINSTANCE g_hInstance;
+HWND g_hwnd;
+
+// Window procedure (this handles messages for the window)
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    default:
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+}
+
+bool CreateRenderWindow() {
+    // Define the window class
+    WNDCLASSEX wc = {};
+    wc.cbSize = sizeof(WNDCLASSEX);
+    wc.lpfnWndProc = WindowProc;       // The window procedure function
+    wc.hInstance = g_hInstance;
+    wc.lpszClassName = L"ScreenRecorderClass";
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+
+    // Register the window class
+    if (!RegisterClassEx(&wc)) {
+        std::cerr << "Failed to register window class!" << std::endl;
+        return false;
+    }
+
+    // Create the window
+    g_hwnd = CreateWindowEx(
+        0,                                  // Extended style
+        wc.lpszClassName,                   // Window class
+        L"WindowInstance1",                  // Window title
+        WS_OVERLAPPEDWINDOW,                 // Window style
+        CW_USEDEFAULT, CW_USEDEFAULT,       // Position
+        2560, 1440,                            // Size
+        nullptr,                            // Parent window
+        nullptr,                            // Menu
+        g_hInstance,                        // Instance handle
+        nullptr                             // Additional application data
+    );
+
+    if (!g_hwnd) {
+        std::cerr << "Failed to create window!" << std::endl;
+        return false;
+    }
+
+    // Show the window
+    ShowWindow(g_hwnd, SW_SHOW);
+    UpdateWindow(g_hwnd);
+
+    return true;
+}
+
+
+bool CreateInputLayout(ComPtr<ID3DBlob> vertexShaderBlob) {
+    D3D11_INPUT_ELEMENT_DESC layoutDesc[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+
+    HRESULT hr = g_device->CreateInputLayout(
+        layoutDesc,
+        ARRAYSIZE(layoutDesc),
+        vertexShaderBlob->GetBufferPointer(),
+        vertexShaderBlob->GetBufferSize(),
+        &g_inputLayout
+    );
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create input layout. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+
+
+
+bool CreateVertexBuffer() {
+    D3D11_BUFFER_DESC bufferDesc = {};
+    bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    bufferDesc.ByteWidth = sizeof(vertices);
+    bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    bufferDesc.CPUAccessFlags = 0;
+
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = vertices;
+
+    HRESULT hr = g_device->CreateBuffer(&bufferDesc, &initData, &g_vertexBuffer);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create vertex buffer. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 
 bool LoadShaders() {
     HRESULT hr;
@@ -138,32 +262,6 @@ bool InitializeDeviceAndDuplication() {
     return true;
 }
 
-bool InitializeTextures() {
-    D3D11_TEXTURE2D_DESC textureDesc = {};
-    textureDesc.Width = 2560;  // Half the screen width
-    textureDesc.Height = 1440; // Screen height
-    textureDesc.MipLevels = 1;
-    textureDesc.ArraySize = 1;
-    textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    textureDesc.SampleDesc.Count = 1;
-    textureDesc.Usage = D3D11_USAGE_DEFAULT;
-    textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-    HRESULT hr = g_device->CreateTexture2D(&textureDesc, nullptr, &g_leftTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create left texture. HRESULT: " << std::hex << hr << std::endl;
-        return false;
-    }
-
-    hr = g_device->CreateTexture2D(&textureDesc, nullptr, &g_rightTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create right texture. HRESULT: " << std::hex << hr << std::endl;
-        return false;
-    }
-
-    std::cout << "Left and right textures initialized successfully." << std::endl;
-    return true;
-}
 
 bool CaptureFrame() {
     if (!g_duplication) {
@@ -194,23 +292,71 @@ bool CaptureFrame() {
 
     std::cout << "Frame captured successfully." << std::endl;
 
+    // Now split the captured frame into left and right halves
+    D3D11_TEXTURE2D_DESC desc;
+    capturedTexture->GetDesc(&desc);
+
+    // Ensure the texture dimensions are even to properly split
+    if (desc.Width % 2 != 0) {
+        desc.Width++;  // Adjust to even width
+    }
+
+    // Create the left and right textures only once (or resize them as needed)
+    if (!g_leftTexture) {
+        // Create the left texture (half the width of the captured frame)
+        desc.Width /= 2;  // Set width to half
+        hr = g_device->CreateTexture2D(&desc, nullptr, &g_leftTexture);
+        if (FAILED(hr)) {
+            std::cerr << "Failed to create left texture. HRESULT: " << std::hex << hr << std::endl;
+            g_duplication->ReleaseFrame();
+            return false;
+        }
+    }
+    std::cout << "LeftTexture Created successfully" << std::endl;
+
+    if (!g_rightTexture) {
+        // Create the right texture (half the width of the captured frame)
+        desc.Width *= 2;  // Restore full width
+        desc.Width /= 2;  // Set width back to half for right texture
+        hr = g_device->CreateTexture2D(&desc, nullptr, &g_rightTexture);
+        if (FAILED(hr)) {
+            std::cerr << "Failed to create right texture. HRESULT: " << std::hex << hr << std::endl;
+            g_duplication->ReleaseFrame();
+            return false;
+        }
+    }
+    std::cout << "RightTexture Created successfully" << std::endl;
+    // Split the captured frame and copy data to left and right textures
+    D3D11_BOX leftBox = { 0, 0, 0, desc.Width, desc.Height, 1 };
+    D3D11_BOX rightBox = { desc.Width, 0, 0, 2 * desc.Width, desc.Height, 1 };
+
+    // Copy the left half to g_leftTexture
+    g_context->CopySubresourceRegion(g_leftTexture.Get(), 0, 0, 0, 0, capturedTexture.Get(), 0, &leftBox);
+    std::cout << "LeftTexture copied to g_leftTexture successfully" << std::endl;
+    // Copy the right half to g_rightTexture
+    g_context->CopySubresourceRegion(g_rightTexture.Get(), 0, 0, 0, 0, capturedTexture.Get(), 0, &rightBox);
+    std::cout << "RightTexture copied to g_rightTexture successfully" << std::endl;
     g_duplication->ReleaseFrame();
     return true;
 }
 
+//Main function
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+
     // Create a console for logging
     CreateConsole();
 
     //LoadWinPixGpuCapturer.dll to be able to atatach
     LoadPixGpuCaptureDll();
 
-    //Start the main program
-    if (!InitializeDeviceAndDuplication()) {
+
+    // Create the window
+    if (!CreateRenderWindow()) {
         return -1;
     }
 
-    if (!InitializeTextures()) {
+    //Start the main program
+    if (!InitializeDeviceAndDuplication()) {
         return -1;
     }
 
