@@ -41,6 +41,15 @@ ComPtr<ID3D11RenderTargetView> rightRTV;
 D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };
 D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 }; 
 
+void SetShaderResources() {
+    // Bind left and right texture SRVs to the pixel shader
+    g_context->PSSetShaderResources(0, 1, g_leftTextureSRV.GetAddressOf());  // Slot 0
+    std::cout << "g_leftTextureSRV set to 0,1 Shader Resource" << std::endl;
+    g_context->PSSetShaderResources(1, 1, g_rightTextureSRV.GetAddressOf()); // Slot 1
+    std::cout << "g_rightTextureSRV set to 1,1 Shader Resource" << std::endl;
+
+
+}
 
 bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
     // Get the texture description
@@ -773,9 +782,11 @@ int main() {
 
     InitializeShaders();
     CreateSwapChainsForWindows(g_leftSwapChain, g_rightSwapChain, leftRTV, rightRTV);
-    InitializeShaders();
     CreateFullSCreenQuad();
-    //CreateShaderResourceViews(); // Call the function here
+
+    CreateShaderResourceViews(); // To bind the textures to shaders texture
+
+    SetShaderResources();
     //InitializeStagingTextures();
     
    
