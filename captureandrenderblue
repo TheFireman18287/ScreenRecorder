@@ -25,134 +25,94 @@ ComPtr<ID3D11RenderTargetView> g_renderTargetView;
 ComPtr<ID3D11Texture2D> g_leftTexture;
 ComPtr<ID3D11Texture2D> g_rightTexture;
 ComPtr<IDXGIOutputDuplication> g_duplication;
+ComPtr<ID3D11Texture2D> backBuffer;
+ComPtr<ID3D11Texture2D> g_stagingTexture;
 
-bool InitializeCaptureResources() {
-    HRESULT hr;
-
-    // Create D3D11 device
-    D3D_FEATURE_LEVEL featureLevel;
-    hr = D3D11CreateDevice(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
-        nullptr,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        nullptr,
-        0,
-        D3D11_SDK_VERSION,
-        &g_device,
-        &featureLevel,
-        &g_context
-    );
+void InitializeCaptureResources() {
+    // Get the backbuffer from the swap chain (to capture)
+    ComPtr<ID3D11Texture2D> backBuffer;
+    HRESULT hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
     if (FAILED(hr)) {
-        std::cerr << "Failed to create D3D11 device. HRESULT: " << std::hex << hr << std::endl;
-        return false;
-    }
-    std::cout << "D3D11 device created successfully." << std::endl;
-
-    // Get DXGI device and output
-    ComPtr<IDXGIDevice> dxgiDevice;
-    hr = g_device.As(&dxgiDevice);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI device. HRESULT: " << std::hex << hr << std::endl;
-        return false;
+        std::cerr << "Failed to get swap chain back buffer!" << std::endl;
+        return;
     }
 
-    ComPtr<IDXGIAdapter> adapter;
-    hr = dxgiDevice->GetAdapter(&adapter);
+    // Create the staging texture for capture (using the existing device)
+    D3D11_TEXTURE2D_DESC desc;
+    backBuffer->GetDesc(&desc);
+
+    // Modify texture descriptor to be suitable for reading from CPU (staging)
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;  // Allow CPU access to the texture data
+
+    // Create the staging texture using the existing device
+    hr = g_device->CreateTexture2D(&desc, nullptr, &g_stagingTexture);
     if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI adapter. HRESULT: " << std::hex << hr << std::endl;
-        return false;
+        std::cerr << "Failed to create staging texture!" << std::endl;
+        return;
     }
 
-    ComPtr<IDXGIOutput> output;
-    hr = adapter->EnumOutputs(0, &output);
+    // Check for split texture setup (if needed for multiple captures)
+    // Example for splitting the textures into two parts (for any specific reason)
+    ComPtr<ID3D11Texture2D> splitTexture1;
+    ComPtr<ID3D11Texture2D> splitTexture2;
+
+    // You can split the texture into two (as in your existing logic)
+    D3D11_TEXTURE2D_DESC splitDesc = desc;  // Copy the existing texture description
+
+    // Modify these split textures as needed for your capture logic
+    splitDesc.Width /= 2;  // Example: Split the texture horizontally
+
+    // Create the first split texture using the existing device
+    hr = g_device->CreateTexture2D(&splitDesc, nullptr, &splitTexture1);
     if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI output. HRESULT: " << std::hex << hr << std::endl;
-        return false;
+        std::cerr << "Failed to create split texture 1!" << std::endl;
+        return;
     }
 
-    ComPtr<IDXGIOutput1> output1;
-    hr = output.As(&output1);
+    // Create the second split texture (after modification, e.g., by changing position or size)
+    splitDesc.Width = desc.Width - splitDesc.Width;  // Adjust the width for the second split
+    hr = g_device->CreateTexture2D(&splitDesc, nullptr, &splitTexture2);
     if (FAILED(hr)) {
-        std::cerr << "Failed to get DXGI output1. HRESULT: " << std::hex << hr << std::endl;
-        return false;
+        std::cerr << "Failed to create split texture 2!" << std::endl;
+        return;
     }
 
-    // Create duplication
-    hr = output1->DuplicateOutput(g_device.Get(), &g_duplication);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create desktop duplication. HRESULT: " << std::hex << hr << std::endl;
-        return false;
-    }
-    std::cout << "Desktop duplication created successfully." << std::endl;
+    // Store the split textures for later use (optional)
+    g_leftTexture = splitTexture1;
+    g_rightTexture = splitTexture2;
 
-    // Create left and right textures
-
-    D3D11_TEXTURE2D_DESC halfDesc = {};
-    halfDesc.Width = 2560;
-    halfDesc.Height = 1440;
-    halfDesc.MipLevels = 1;
-    halfDesc.ArraySize = 1;
-    halfDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    halfDesc.SampleDesc.Count = 1;
-    halfDesc.Usage = D3D11_USAGE_DEFAULT;
-    halfDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-    hr = g_device->CreateTexture2D(&halfDesc, nullptr, &g_leftTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create left texture. HRESULT: " << std::hex << hr << std::endl;
-        return false;
-    }
-
-    hr = g_device->CreateTexture2D(&halfDesc, nullptr, &g_rightTexture);
-    if (FAILED(hr)) {
-        std::cerr << "Failed to create right texture. HRESULT: " << std::hex << hr << std::endl;
-        return false;
-    }
-
-    std::cout << "Textures for splitting created successfully." << std::endl;
-    std::cout << "Finished Creating Device, Duplicate, Texture Spliting (1 func: InitializeCaptureResources) " << std::endl;
-    return true;
+    std::cout << "Capture resources initialized successfully." << std::endl;
 }
 
-void CreateDeviceAndSwapChain(HWND hwnd) {
-    HRESULT hr = S_OK;
 
-    // Swap chain description
+HRESULT CreateDeviceAndSwapChain(HWND hwnd) {
+    // Define swap chain and device initialization
     DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
     swapChainDesc.BufferCount = 1;
-    swapChainDesc.BufferDesc.Width = 800; // Window width
-    swapChainDesc.BufferDesc.Height = 600; // Window height
+    swapChainDesc.BufferDesc.Width = 1920;
+    swapChainDesc.BufferDesc.Height = 1080;
     swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
     swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.OutputWindow = hwnd;  // Window handle
+    swapChainDesc.OutputWindow = hwnd;
     swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.SampleDesc.Quality = 0;
     swapChainDesc.Windowed = TRUE;
 
-    // Create device and swap chain
-    hr = D3D11CreateDeviceAndSwapChain(
-        nullptr,                    // Default adapter
-        D3D_DRIVER_TYPE_HARDWARE,   // Hardware rendering
-        nullptr,                    // No software rasterizer
-        0,                          // No flags
-        nullptr,                    // No feature levels
-        0,                          // No feature levels
-        D3D11_SDK_VERSION,          // SDK version
-        &swapChainDesc,             // Swap chain description
-        &g_swapChain,               // Output swap chain
-        &g_device,                  // Output device
-        nullptr,                    // Output feature level (optional)
-        &g_context                  // Output device context
+    // Create the device, context, and swap chain
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
+        D3D11_SDK_VERSION, &swapChainDesc, &g_swapChain, &g_device, nullptr, &g_context
     );
 
     if (FAILED(hr)) {
-        std::cerr << "Failed to create D3D11 device and swap chain. HRESULT: " << std::hex << hr << std::endl;
-        return;
+        std::cerr << "Failed to create device and swap chain!" << std::endl;
+        return hr;
     }
-    std::cout << "Device and swap chain created successfully." << std::endl;
+
+    return S_OK;
 }
 
 
