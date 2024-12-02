@@ -1,0 +1,473 @@
+#include <d3d11.h>
+#include <dxgi.h>
+#include <windows.h>
+#include <iostream>
+#include <wrl/client.h>
+#include <dxgi1_2.h>
+#include <wrl.h>
+#include <chrono>
+#include <vector>
+#include <fstream> // For redirecting std::cout and std::cerr
+#include <wincodec.h> // For Windows Imaging Component
+#include <d3dcompiler.h>
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+#include <thread>
+
+using Microsoft::WRL::ComPtr;
+
+// Global variables
+ComPtr<ID3D11Device> g_device;
+ComPtr<ID3D11DeviceContext> g_context;
+ComPtr<IDXGISwapChain> g_swapChain;
+ComPtr<ID3D11RenderTargetView> g_renderTargetView;
+ComPtr<ID3D11Texture2D> g_leftTexture;
+ComPtr<ID3D11Texture2D> g_rightTexture;
+ComPtr<IDXGIOutputDuplication> g_duplication;
+
+bool InitializeCaptureResources() {
+    HRESULT hr;
+
+    // Create D3D11 device
+    D3D_FEATURE_LEVEL featureLevel;
+    hr = D3D11CreateDevice(
+        nullptr,
+        D3D_DRIVER_TYPE_HARDWARE,
+        nullptr,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        nullptr,
+        0,
+        D3D11_SDK_VERSION,
+        &g_device,
+        &featureLevel,
+        &g_context
+    );
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create D3D11 device. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+    std::cout << "D3D11 device created successfully." << std::endl;
+
+    // Get DXGI device and output
+    ComPtr<IDXGIDevice> dxgiDevice;
+    hr = g_device.As(&dxgiDevice);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get DXGI device. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    ComPtr<IDXGIAdapter> adapter;
+    hr = dxgiDevice->GetAdapter(&adapter);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get DXGI adapter. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    ComPtr<IDXGIOutput> output;
+    hr = adapter->EnumOutputs(0, &output);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get DXGI output. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    ComPtr<IDXGIOutput1> output1;
+    hr = output.As(&output1);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get DXGI output1. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    // Create duplication
+    hr = output1->DuplicateOutput(g_device.Get(), &g_duplication);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create desktop duplication. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+    std::cout << "Desktop duplication created successfully." << std::endl;
+
+    // Create left and right textures
+
+    D3D11_TEXTURE2D_DESC halfDesc = {};
+    halfDesc.Width = 2560;
+    halfDesc.Height = 1440;
+    halfDesc.MipLevels = 1;
+    halfDesc.ArraySize = 1;
+    halfDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    halfDesc.SampleDesc.Count = 1;
+    halfDesc.Usage = D3D11_USAGE_DEFAULT;
+    halfDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    hr = g_device->CreateTexture2D(&halfDesc, nullptr, &g_leftTexture);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create left texture. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    hr = g_device->CreateTexture2D(&halfDesc, nullptr, &g_rightTexture);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create right texture. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    std::cout << "Textures for splitting created successfully." << std::endl;
+    std::cout << "Finished Creating Device, Duplicate, Texture Spliting (1 func: InitializeCaptureResources) " << std::endl;
+    return true;
+}
+
+void CreateDeviceAndSwapChain(HWND hwnd) {
+    HRESULT hr = S_OK;
+
+    // Swap chain description
+    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+    swapChainDesc.BufferCount = 1;
+    swapChainDesc.BufferDesc.Width = 800; // Window width
+    swapChainDesc.BufferDesc.Height = 600; // Window height
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    swapChainDesc.BufferDesc.RefreshRate.Numerator = 60;
+    swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.OutputWindow = hwnd;  // Window handle
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.SampleDesc.Quality = 0;
+    swapChainDesc.Windowed = TRUE;
+
+    // Create device and swap chain
+    hr = D3D11CreateDeviceAndSwapChain(
+        nullptr,                    // Default adapter
+        D3D_DRIVER_TYPE_HARDWARE,   // Hardware rendering
+        nullptr,                    // No software rasterizer
+        0,                          // No flags
+        nullptr,                    // No feature levels
+        0,                          // No feature levels
+        D3D11_SDK_VERSION,          // SDK version
+        &swapChainDesc,             // Swap chain description
+        &g_swapChain,               // Output swap chain
+        &g_device,                  // Output device
+        nullptr,                    // Output feature level (optional)
+        &g_context                  // Output device context
+    );
+
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create D3D11 device and swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+    std::cout << "Device and swap chain created successfully." << std::endl;
+}
+
+
+bool SaveTextureAsPNGStandalone(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* texture, const wchar_t* filename) {
+    // Get the texture description
+
+    D3D11_TEXTURE2D_DESC desc;
+    texture->GetDesc(&desc);
+
+    // Create a staging texture to copy GPU data to CPU
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingDesc.BindFlags = 0;
+
+    ComPtr<ID3D11Texture2D> stagingTexture;
+    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
+
+
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        std::cerr << "Device lost. Reason: "
+            << std::hex << g_device->GetDeviceRemovedReason() << std::endl;
+    }
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create staging texture. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+
+    // Copy the data from the source texture to the staging texture
+    context->CopyResource(stagingTexture.Get(), texture);
+
+
+
+    // Map the staging texture to access its data
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = context->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to map staging texture. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    // Initialize WIC
+    ComPtr<IWICImagingFactory> wicFactory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wicFactory));
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create WIC factory. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    // Create a PNG encoder
+    ComPtr<IWICBitmapEncoder> encoder;
+    hr = wicFactory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create PNG encoder. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    // Create a stream for the output file
+    ComPtr<IWICStream> stream;
+    hr = wicFactory->CreateStream(&stream);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create WIC stream. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    hr = stream->InitializeFromFilename(filename, GENERIC_WRITE);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to initialize WIC stream. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    // Initialize the encoder
+    hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to initialize PNG encoder. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    // Create a frame for the PNG
+    ComPtr<IWICBitmapFrameEncode> frame;
+    hr = encoder->CreateNewFrame(&frame, nullptr);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create PNG frame. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    hr = frame->Initialize(nullptr);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to initialize PNG frame. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    hr = frame->SetSize(desc.Width, desc.Height);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to set PNG frame size. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    // Set the pixel format
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    hr = frame->SetPixelFormat(&format);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to set PNG pixel format. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    // Write the pixel data to the PNG
+    hr = frame->WritePixels(
+        desc.Height,
+        mappedResource.RowPitch,
+        mappedResource.RowPitch * desc.Height,
+        static_cast<BYTE*>(mappedResource.pData)
+    );
+    if (FAILED(hr)) {
+        std::cerr << "Failed to write PNG pixels. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    hr = frame->Commit();
+    if (FAILED(hr)) {
+        std::cerr << "Failed to commit PNG frame. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    hr = encoder->Commit();
+    if (FAILED(hr)) {
+        std::cerr << "Failed to commit PNG encoder. HRESULT: " << std::hex << hr << std::endl;
+        context->Unmap(stagingTexture.Get(), 0);
+        return false;
+    }
+
+    std::cout << "Saved PNG: " << filename << std::endl;
+    context->Unmap(stagingTexture.Get(), 0);
+    return true;
+}
+
+
+// Function to capture a frame
+bool CaptureFrame() {
+    ComPtr<IDXGIResource> desktopResource;
+    DXGI_OUTDUPL_FRAME_INFO frameInfo;
+    HRESULT hr = g_duplication->AcquireNextFrame(500, &frameInfo, &desktopResource);
+    if (FAILED(hr)) {
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) return true; // No new frame
+        std::cerr << "Failed to acquire next frame. HRESULT: " << std::hex << hr << std::endl;
+        return false;
+    }
+
+    // Get the captured texture
+    ComPtr<ID3D11Texture2D> capturedTexture;
+    hr = desktopResource.As(&capturedTexture);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get captured texture. HRESULT: " << std::hex << hr << std::endl;
+        g_duplication->ReleaseFrame();
+        return false;
+    }
+
+    // Split the captured frame into left and right halves
+    D3D11_BOX leftBox = { 0, 0, 0, 2560, 1440, 1 };
+    D3D11_BOX rightBox = { 2560, 0, 0, 5120, 1440, 1 };
+
+    g_context->CopySubresourceRegion(g_leftTexture.Get(), 0, 0, 0, 0, capturedTexture.Get(), 0, &leftBox);
+    g_context->CopySubresourceRegion(g_rightTexture.Get(), 0, 0, 0, 0, capturedTexture.Get(), 0, &rightBox);
+
+    std::cout << "Frame split successfully into left and right textures." << std::endl;
+
+    g_duplication->ReleaseFrame();
+
+    // Save left and right textures as PNG files
+
+    // Commenting out image creation for now
+
+    static int frameIndex = 0;
+    wchar_t leftFilename[128];
+    wchar_t rightFilename[128];
+    swprintf_s(leftFilename, L"left_frame_%d.png", frameIndex);
+    swprintf_s(rightFilename, L"right_frame_%d.png", frameIndex);
+
+    SaveTextureAsPNGStandalone(g_device.Get(), g_context.Get(), g_leftTexture.Get(), leftFilename);
+    SaveTextureAsPNGStandalone(g_device.Get(), g_context.Get(), g_rightTexture.Get(), rightFilename);
+
+    frameIndex++;
+
+
+
+
+    return true;
+}
+
+
+void CreateRenderTargetView() {
+    // Get the back buffer from the swap chain
+    ComPtr<ID3D11Texture2D> backBuffer;
+    HRESULT hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    if (FAILED(hr)) {
+        std::cerr << "Failed to get back buffer from swap chain. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Create render target view (RTV) from the back buffer
+    hr = g_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &g_renderTargetView);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create render target view. HRESULT: " << std::hex << hr << std::endl;
+        return;
+    }
+
+    // Set the render target view
+    g_context->OMSetRenderTargets(1, g_renderTargetView.GetAddressOf(), nullptr);
+}
+
+void RenderLoop(HWND hwnd) {
+    // Set up the render target
+    CreateRenderTargetView();
+
+    // Set the viewport (this should match the window size)
+    D3D11_VIEWPORT viewport = {};
+    viewport.Width = 800;  // Match window size
+    viewport.Height = 600;
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    g_context->RSSetViewports(1, &viewport);
+
+    // Clear the render target to a color (optional)
+    float clearColor[] = { 0.0f, 0.0f, 1.0f, 1.0f };  // Blue color
+    g_context->ClearRenderTargetView(g_renderTargetView.Get(), clearColor);
+
+    // Drawing commands here (e.g., draw a triangle, quad, etc.)
+
+    // Present the swap chain (this shows the rendered content)
+    g_swapChain->Present(1, 0);
+}
+
+void Cleanup() {
+    // Resources are automatically released by the ComPtr, but it's good practice to reset them manually if needed.
+    g_renderTargetView.Reset();
+    g_swapChain.Reset();
+    g_context.Reset();
+    g_device.Reset();
+}
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_SIZE:
+        // Handle resizing (optional)
+        break;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow) {
+
+    // Attach a console for logging
+    AllocConsole();
+    FILE* consoleOutput;
+    freopen_s(&consoleOutput, "CONOUT$", "w", stdout);
+    freopen_s(&consoleOutput, "CONOUT$", "w", stderr);
+
+    std::cout << "Console attached. Starting application..." << std::endl;
+
+    //initilize capture resources for frame
+    //InitializeCaptureResources();
+
+    // Initialize Win32 window (this should be done before creating the device)
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"Direct3D11WindowClass";
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0, wc.lpszClassName, L"Direct3D 11 Window", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, nullptr, nullptr, hInstance, nullptr
+    );
+
+    if (!hwnd) {
+        std::cerr << "Failed to create window." << std::endl;
+        return -1;
+    }
+
+    ShowWindow(hwnd, nCmdShow);
+
+    // Create device and swap chain
+    CreateDeviceAndSwapChain(hwnd);
+
+    // Main render loop
+    MSG msg = {};
+    while (msg.message != WM_QUIT) {
+        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        else {
+            //CaptureFrame();
+            // Render the scene
+            RenderLoop(hwnd);
+        }
+    }
+
+    Cleanup();
+    return 0;
+}
